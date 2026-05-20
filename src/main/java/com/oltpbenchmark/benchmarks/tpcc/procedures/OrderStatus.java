@@ -36,29 +36,35 @@ import org.slf4j.LoggerFactory;
 public class OrderStatus extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(OrderStatus.class);
+  private static final boolean HELIOS_ONESHOT_PLAN =
+      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
 
   public SQLStmt ordStatGetNewestOrdSQL =
       new SQLStmt(
           """
         SELECT O_ID, O_CARRIER_ID, O_ENTRY_D
-          FROM  %s
+          FROM  %s %s
          WHERE O_W_ID = ?
            AND O_D_ID = ?
            AND O_C_ID = ?
          ORDER BY O_ID DESC LIMIT 1
     """
-              .formatted(TPCCConstants.TABLENAME_OPENORDER));
+              .formatted(
+                  TPCCConstants.TABLENAME_OPENORDER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (o_w_id)" : ""));
 
   public SQLStmt ordStatGetOrderLinesSQL =
       new SQLStmt(
           """
         SELECT OL_I_ID, OL_SUPPLY_W_ID, OL_QUANTITY, OL_AMOUNT, OL_DELIVERY_D
-          FROM  %s
+          FROM  %s %s
          WHERE OL_O_ID = ?
            AND OL_D_ID = ?
            AND OL_W_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_ORDERLINE));
+              .formatted(
+                  TPCCConstants.TABLENAME_ORDERLINE,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payGetCustSQL =
       new SQLStmt(
@@ -66,12 +72,14 @@ public class OrderStatus extends TPCCProcedure {
         SELECT C_FIRST, C_MIDDLE, C_LAST, C_STREET_1, C_STREET_2,
                C_CITY, C_STATE, C_ZIP, C_PHONE, C_CREDIT, C_CREDIT_LIM,
                C_DISCOUNT, C_BALANCE, C_YTD_PAYMENT, C_PAYMENT_CNT, C_SINCE
-          FROM  %s
+          FROM  %s %s
          WHERE C_W_ID = ?
            AND C_D_ID = ?
            AND C_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_CUSTOMER));
+              .formatted(
+                  TPCCConstants.TABLENAME_CUSTOMER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt customerByNameSQL =
       new SQLStmt(
@@ -110,6 +118,10 @@ public class OrderStatus extends TPCCProcedure {
     } else {
       c_by_name = false;
       c_id = TPCCUtil.getCustomerID(gen);
+    }
+
+    if (HELIOS_ONESHOT_PLAN) {
+      setOrdoOneshotPlan(conn, w_id, d_id, c_by_name, c_last, c_id);
     }
 
     Customer c;
@@ -170,6 +182,78 @@ public class OrderStatus extends TPCCProcedure {
       sb.append("+-----------------------------------------------------------------+\n\n");
       LOG.trace(sb.toString());
     }
+  }
+
+  private void setOrdoOneshotPlan(
+      Connection conn, int w_id, int d_id, boolean customerByName, String c_last, int c_id)
+      throws SQLException {
+    StringBuilder plan = new StringBuilder();
+    if (customerByName) {
+      appendPlanSiScan(
+          plan, TPCCConstants.TABLENAME_CUSTOMER, "idx_customer_name", w_id, d_id, c_last);
+      appendPlanSiScan(plan, TPCCConstants.TABLENAME_CUSTOMER, "idx_customer_name", "B0.MK");
+      appendPlanSiScanWithOptions(
+          plan,
+          TPCCConstants.TABLENAME_OPENORDER,
+          "o_w_id",
+          "limit=1",
+          "reverse=1",
+          w_id,
+          d_id,
+          "B0.MCI2");
+      appendPlanScan(plan, TPCCConstants.TABLENAME_ORDERLINE, w_id, d_id, "B2.CI2");
+    } else {
+      appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, w_id, d_id, c_id);
+      appendPlanSiScanWithOptions(
+          plan,
+          TPCCConstants.TABLENAME_OPENORDER,
+          "o_w_id",
+          "limit=1",
+          "reverse=1",
+          w_id,
+          d_id,
+          c_id);
+      appendPlanScan(plan, TPCCConstants.TABLENAME_ORDERLINE, w_id, d_id, "B1.CI2");
+    }
+
+    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
+      stmt.setString(1, plan.toString());
+      stmt.execute();
+    }
+  }
+
+  private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "R", tableName, keyParts);
+  }
+
+  private void appendPlanScan(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "S", tableName, keyParts);
+  }
+
+  private void appendPlanSiScan(
+      StringBuilder plan, String tableName, String indexName, Object... keyParts) {
+    appendPlanSiScanWithOptions(plan, tableName, indexName, null, null, keyParts);
+  }
+
+  private void appendPlanSiScanWithOptions(
+      StringBuilder plan,
+      String tableName,
+      String indexName,
+      String limit,
+      String reverse,
+      Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append("SI").append(':').append(tableName).append(':').append(indexName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
+    if (limit != null) plan.append(':').append(limit);
+    if (reverse != null) plan.append(':').append(reverse);
+  }
+
+  private void appendPlanStep(
+      StringBuilder plan, String stepType, String tableName, Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append(stepType).append(':').append(tableName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
   }
 
   private Oorder getOrderDetails(Connection conn, int w_id, int d_id, Customer c)

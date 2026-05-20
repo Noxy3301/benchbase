@@ -31,6 +31,8 @@ import org.slf4j.LoggerFactory;
 public class NewOrder extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(NewOrder.class);
+  private static final boolean HELIOS_ONESHOT_PLAN =
+      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
 
   public final SQLStmt stmtGetCustSQL =
       new SQLStmt(
@@ -103,16 +105,18 @@ public class NewOrder extends TPCCProcedure {
           """
         SELECT S_QUANTITY, S_DATA, S_DIST_01, S_DIST_02, S_DIST_03, S_DIST_04, S_DIST_05,
                S_DIST_06, S_DIST_07, S_DIST_08, S_DIST_09, S_DIST_10
-          FROM %s
+          FROM %s %s
          WHERE S_I_ID = ?
            AND S_W_ID = ? FOR UPDATE
     """
-              .formatted(TPCCConstants.TABLENAME_STOCK));
+              .formatted(
+                  TPCCConstants.TABLENAME_STOCK,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public final SQLStmt stmtUpdateStockSQL =
       new SQLStmt(
           """
-        UPDATE %s
+        UPDATE %s %s
            SET S_QUANTITY = ? ,
                S_YTD = S_YTD + ?,
                S_ORDER_CNT = S_ORDER_CNT + 1,
@@ -120,7 +124,9 @@ public class NewOrder extends TPCCProcedure {
          WHERE S_I_ID = ?
            AND S_W_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_STOCK));
+              .formatted(
+                  TPCCConstants.TABLENAME_STOCK,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public final SQLStmt stmtInsertOrderLineSQL =
       new SQLStmt(
@@ -168,6 +174,11 @@ public class NewOrder extends TPCCProcedure {
       itemIDs[numItems - 1] = TPCCConfig.INVALID_ITEM_ID;
     }
 
+    if (HELIOS_ONESHOT_PLAN) {
+      setOrdoOneshotPlan(
+          conn, terminalWarehouseID, districtID, customerID, itemIDs, supplierWarehouseIDs);
+    }
+
     newOrderTransaction(
         terminalWarehouseID,
         districtID,
@@ -178,6 +189,34 @@ public class NewOrder extends TPCCProcedure {
         supplierWarehouseIDs,
         orderQuantities,
         conn);
+  }
+
+  private void setOrdoOneshotPlan(
+      Connection conn, int w_id, int d_id, int c_id, int[] itemIDs, int[] supplierWarehouseIDs)
+      throws SQLException {
+    StringBuilder plan = new StringBuilder();
+    appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, w_id, d_id, c_id);
+    appendPlanRead(plan, TPCCConstants.TABLENAME_WAREHOUSE, w_id);
+    appendPlanRead(plan, TPCCConstants.TABLENAME_DISTRICT, w_id, d_id);
+    for (int i = 0; i < itemIDs.length; i++) {
+      appendPlanRead(plan, TPCCConstants.TABLENAME_ITEM, itemIDs[i]);
+      appendPlanRead(plan, TPCCConstants.TABLENAME_STOCK, supplierWarehouseIDs[i], itemIDs[i]);
+    }
+
+    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
+      stmt.setString(1, plan.toString());
+      stmt.execute();
+    }
+  }
+
+  private void appendPlanRead(StringBuilder plan, String tableName, int... keyParts) {
+    if (plan.length() > 0) {
+      plan.append(';');
+    }
+    plan.append('R').append(':').append(tableName);
+    for (int keyPart : keyParts) {
+      plan.append(':').append(keyPart);
+    }
   }
 
   private void newOrderTransaction(

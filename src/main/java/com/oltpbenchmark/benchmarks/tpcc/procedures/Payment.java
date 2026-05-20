@@ -35,6 +35,8 @@ import org.slf4j.LoggerFactory;
 public class Payment extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(Payment.class);
+  private static final boolean HELIOS_ONESHOT_PLAN =
+      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
 
   public SQLStmt payUpdateWhseSQL =
       new SQLStmt(
@@ -80,28 +82,32 @@ public class Payment extends TPCCProcedure {
         SELECT C_FIRST, C_MIDDLE, C_LAST, C_STREET_1, C_STREET_2,
                C_CITY, C_STATE, C_ZIP, C_PHONE, C_CREDIT, C_CREDIT_LIM,
                C_DISCOUNT, C_BALANCE, C_YTD_PAYMENT, C_PAYMENT_CNT, C_SINCE
-          FROM %s
+          FROM %s %s
          WHERE C_W_ID = ?
            AND C_D_ID = ?
            AND C_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_CUSTOMER));
+              .formatted(
+                  TPCCConstants.TABLENAME_CUSTOMER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payGetCustCdataSQL =
       new SQLStmt(
           """
         SELECT C_DATA
-          FROM %s
+          FROM %s %s
          WHERE C_W_ID = ?
            AND C_D_ID = ?
            AND C_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_CUSTOMER));
+              .formatted(
+                  TPCCConstants.TABLENAME_CUSTOMER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payUpdateCustBalCdataSQL =
       new SQLStmt(
           """
-        UPDATE %s
+        UPDATE %s %s
            SET C_BALANCE = ?,
                C_YTD_PAYMENT = ?,
                C_PAYMENT_CNT = ?,
@@ -110,12 +116,14 @@ public class Payment extends TPCCProcedure {
            AND C_D_ID = ?
            AND C_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_CUSTOMER));
+              .formatted(
+                  TPCCConstants.TABLENAME_CUSTOMER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payUpdateCustBalSQL =
       new SQLStmt(
           """
-        UPDATE %s
+        UPDATE %s %s
            SET C_BALANCE = ?,
                C_YTD_PAYMENT = ?,
                C_PAYMENT_CNT = ?
@@ -123,7 +131,9 @@ public class Payment extends TPCCProcedure {
            AND C_D_ID = ?
            AND C_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_CUSTOMER));
+              .formatted(
+                  TPCCConstants.TABLENAME_CUSTOMER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payInsertHistSQL =
       new SQLStmt(
@@ -162,6 +172,33 @@ public class Payment extends TPCCProcedure {
 
     float paymentAmount = (float) (TPCCUtil.randomNumber(100, 500000, gen) / 100.0);
 
+    int x = TPCCUtil.randomNumber(1, 100, gen);
+
+    int customerDistrictID = getCustomerDistrictId(gen, districtID, x);
+    int customerWarehouseID = getCustomerWarehouseID(gen, w_id, numWarehouses, x);
+
+    int y = TPCCUtil.randomNumber(1, 100, gen);
+    boolean customerByName = y <= 60;
+    String customerLastName = null;
+    int customerID = -1;
+    if (customerByName) {
+      customerLastName = TPCCUtil.getNonUniformRandomLastNameForRun(gen);
+    } else {
+      customerID = TPCCUtil.getCustomerID(gen);
+    }
+
+    if (HELIOS_ONESHOT_PLAN) {
+      setOrdoOneshotPlan(
+          conn,
+          w_id,
+          districtID,
+          customerWarehouseID,
+          customerDistrictID,
+          customerByName,
+          customerLastName,
+          customerID);
+    }
+
     updateWarehouse(conn, w_id, paymentAmount);
 
     Warehouse w = getWarehouse(conn, w_id);
@@ -170,12 +207,15 @@ public class Payment extends TPCCProcedure {
 
     District d = getDistrict(conn, w_id, districtID);
 
-    int x = TPCCUtil.randomNumber(1, 100, gen);
-
-    int customerDistrictID = getCustomerDistrictId(gen, districtID, x);
-    int customerWarehouseID = getCustomerWarehouseID(gen, w_id, numWarehouses, x);
-
-    Customer c = getCustomer(conn, gen, customerDistrictID, customerWarehouseID, paymentAmount);
+    Customer c =
+        getCustomer(
+            conn,
+            customerDistrictID,
+            customerWarehouseID,
+            paymentAmount,
+            customerByName,
+            customerLastName,
+            customerID);
 
     if (c.c_credit.equals("BC")) {
       // bad credit
@@ -287,6 +327,56 @@ public class Payment extends TPCCProcedure {
     }
   }
 
+  private void setOrdoOneshotPlan(
+      Connection conn,
+      int w_id,
+      int d_id,
+      int c_w_id,
+      int c_d_id,
+      boolean customerByName,
+      String customerLastName,
+      int c_id)
+      throws SQLException {
+    StringBuilder plan = new StringBuilder();
+    appendPlanRead(plan, TPCCConstants.TABLENAME_WAREHOUSE, w_id);
+    appendPlanRead(plan, TPCCConstants.TABLENAME_DISTRICT, w_id, d_id);
+    if (customerByName) {
+      appendPlanSiScan(
+          plan,
+          TPCCConstants.TABLENAME_CUSTOMER,
+          "idx_customer_name",
+          c_w_id,
+          c_d_id,
+          customerLastName);
+      appendPlanSiScan(plan, TPCCConstants.TABLENAME_CUSTOMER, "idx_customer_name", "B2.MK");
+    } else {
+      appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, c_w_id, c_d_id, c_id);
+    }
+
+    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
+      stmt.setString(1, plan.toString());
+      stmt.execute();
+    }
+  }
+
+  private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "R", tableName, keyParts);
+  }
+
+  private void appendPlanSiScan(
+      StringBuilder plan, String tableName, String indexName, Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append("SI").append(':').append(tableName).append(':').append(indexName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
+  }
+
+  private void appendPlanStep(
+      StringBuilder plan, String stepType, String tableName, Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append(stepType).append(':').append(tableName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
+  }
+
   private int getCustomerWarehouseID(Random gen, int w_id, int numWarehouses, int x) {
     int customerWarehouseID;
     if (x <= 85) {
@@ -344,28 +434,21 @@ public class Payment extends TPCCProcedure {
 
   private Customer getCustomer(
       Connection conn,
-      Random gen,
       int customerDistrictID,
       int customerWarehouseID,
-      float paymentAmount)
+      float paymentAmount,
+      boolean customerByName,
+      String customerLastName,
+      int customerID)
       throws SQLException {
-    int y = TPCCUtil.randomNumber(1, 100, gen);
-
     Customer c;
 
-    if (y <= 60) {
+    if (customerByName) {
       // 60% lookups by last name
-      c =
-          getCustomerByName(
-              customerWarehouseID,
-              customerDistrictID,
-              TPCCUtil.getNonUniformRandomLastNameForRun(gen),
-              conn);
+      c = getCustomerByName(customerWarehouseID, customerDistrictID, customerLastName, conn);
     } else {
       // 40% lookups by customer ID
-      c =
-          getCustomerById(
-              customerWarehouseID, customerDistrictID, TPCCUtil.getCustomerID(gen), conn);
+      c = getCustomerById(customerWarehouseID, customerDistrictID, customerID, conn);
     }
 
     c.c_balance -= paymentAmount;

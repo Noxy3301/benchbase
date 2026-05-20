@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
 public class StockLevel extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(StockLevel.class);
+  private static final boolean HELIOS_ONESHOT_PLAN =
+      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
 
   public SQLStmt stockGetDistOrderIdSQL =
       new SQLStmt(
@@ -71,6 +73,10 @@ public class StockLevel extends TPCCProcedure {
     int threshold = TPCCUtil.randomNumber(10, 20, gen);
     int d_id = TPCCUtil.randomNumber(terminalDistrictLowerID, terminalDistrictUpperID, gen);
 
+    if (HELIOS_ONESHOT_PLAN) {
+      setOrdoOneshotPlan(conn, w_id, d_id);
+    }
+
     int o_id = getOrderId(conn, w_id, d_id);
 
     int stock_count = getStockCount(conn, w_id, threshold, d_id, o_id);
@@ -89,6 +95,46 @@ public class StockLevel extends TPCCProcedure {
               + "\n+-----------------------------------------------------------------+\n\n";
       LOG.trace(terminalMessage);
     }
+  }
+
+  private void setOrdoOneshotPlan(Connection conn, int w_id, int d_id) throws SQLException {
+    StringBuilder plan = new StringBuilder();
+    appendPlanRead(plan, TPCCConstants.TABLENAME_DISTRICT, w_id, d_id);
+    appendPlanRange(
+        plan,
+        TPCCConstants.TABLENAME_ORDERLINE,
+        new Object[] {w_id, d_id, "B0.CI4-20"},
+        new Object[] {w_id, d_id, "B0.CI4"});
+    appendPlanForEach(plan, TPCCConstants.TABLENAME_STOCK, w_id, "B1.CI4");
+
+    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
+      stmt.setString(1, plan.toString());
+      stmt.execute();
+    }
+  }
+
+  private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "R", tableName, keyParts);
+  }
+
+  private void appendPlanForEach(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "FE", tableName, keyParts);
+  }
+
+  private void appendPlanRange(
+      StringBuilder plan, String tableName, Object[] startParts, Object[] endParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append("S").append(':').append(tableName);
+    for (Object keyPart : startParts) plan.append(':').append(keyPart);
+    plan.append(":E");
+    for (Object keyPart : endParts) plan.append(':').append(keyPart);
+  }
+
+  private void appendPlanStep(
+      StringBuilder plan, String stepType, String tableName, Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append(stepType).append(':').append(tableName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
   }
 
   private int getOrderId(Connection conn, int w_id, int d_id) throws SQLException {

@@ -31,6 +31,8 @@ import org.slf4j.LoggerFactory;
 public class Delivery extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(Delivery.class);
+  private static final boolean HELIOS_ONESHOT_PLAN =
+      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
 
   public SQLStmt delivGetOrderIdSQL =
       new SQLStmt(
@@ -56,57 +58,67 @@ public class Delivery extends TPCCProcedure {
   public SQLStmt delivGetCustIdSQL =
       new SQLStmt(
           """
-            SELECT O_C_ID FROM %s
+            SELECT O_C_ID FROM %s %s
             WHERE O_ID = ?
             AND O_D_ID = ?
             AND O_W_ID = ?
         """
-              .formatted(TPCCConstants.TABLENAME_OPENORDER));
+              .formatted(
+                  TPCCConstants.TABLENAME_OPENORDER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivUpdateCarrierIdSQL =
       new SQLStmt(
           """
-        UPDATE %s
+        UPDATE %s %s
            SET O_CARRIER_ID = ?
          WHERE O_ID = ?
            AND O_D_ID = ?
            AND O_W_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_OPENORDER));
+              .formatted(
+                  TPCCConstants.TABLENAME_OPENORDER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivUpdateDeliveryDateSQL =
       new SQLStmt(
           """
-        UPDATE %s
+        UPDATE %s %s
            SET OL_DELIVERY_D = ?
          WHERE OL_O_ID = ?
            AND OL_D_ID = ?
            AND OL_W_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_ORDERLINE));
+              .formatted(
+                  TPCCConstants.TABLENAME_ORDERLINE,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivSumOrderAmountSQL =
       new SQLStmt(
           """
         SELECT SUM(OL_AMOUNT) AS OL_TOTAL
-          FROM %s
+          FROM %s %s
          WHERE OL_O_ID = ?
            AND OL_D_ID = ?
            AND OL_W_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_ORDERLINE));
+              .formatted(
+                  TPCCConstants.TABLENAME_ORDERLINE,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivUpdateCustBalDelivCntSQL =
       new SQLStmt(
           """
-        UPDATE %s
+        UPDATE %s %s
            SET C_BALANCE = C_BALANCE + ?,
                C_DELIVERY_CNT = C_DELIVERY_CNT + 1
          WHERE C_W_ID = ?
            AND C_D_ID = ?
            AND C_ID = ?
     """
-              .formatted(TPCCConstants.TABLENAME_CUSTOMER));
+              .formatted(
+                  TPCCConstants.TABLENAME_CUSTOMER,
+                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public void run(
       Connection conn,
@@ -123,6 +135,10 @@ public class Delivery extends TPCCProcedure {
     int d_id;
 
     int[] orderIDs = new int[10];
+
+    if (HELIOS_ONESHOT_PLAN) {
+      setOrdoOneshotPlan(conn, w_id, terminalDistrictUpperID);
+    }
 
     for (d_id = 1; d_id <= terminalDistrictUpperID; d_id++) {
       Integer no_o_id = getOrderId(conn, w_id, d_id);
@@ -171,6 +187,48 @@ public class Delivery extends TPCCProcedure {
           "+-----------------------------------------------------------------+\n\n");
       LOG.trace(terminalMessage.toString());
     }
+  }
+
+  private void setOrdoOneshotPlan(Connection conn, int w_id, int terminalDistrictUpperID)
+      throws SQLException {
+    StringBuilder plan = new StringBuilder();
+    for (int d_id = 1; d_id <= terminalDistrictUpperID; d_id++) {
+      int base = (d_id - 1) * 4;
+      appendPlanScanWithOptions(
+          plan, TPCCConstants.TABLENAME_NEWORDER, "limit=1", null, w_id, d_id);
+      appendPlanRead(plan, TPCCConstants.TABLENAME_OPENORDER, w_id, d_id, "B" + base + ".CI2");
+      appendPlanScan(plan, TPCCConstants.TABLENAME_ORDERLINE, w_id, d_id, "B" + base + ".CI2");
+      appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, w_id, d_id, "B" + (base + 1) + ".CI3");
+    }
+
+    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
+      stmt.setString(1, plan.toString());
+      stmt.execute();
+    }
+  }
+
+  private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "R", tableName, keyParts);
+  }
+
+  private void appendPlanScan(StringBuilder plan, String tableName, Object... keyParts) {
+    appendPlanStep(plan, "S", tableName, keyParts);
+  }
+
+  private void appendPlanScanWithOptions(
+      StringBuilder plan, String tableName, String limit, String reverse, Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append("S").append(':').append(tableName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
+    if (limit != null) plan.append(':').append(limit);
+    if (reverse != null) plan.append(':').append(reverse);
+  }
+
+  private void appendPlanStep(
+      StringBuilder plan, String stepType, String tableName, Object... keyParts) {
+    if (plan.length() > 0) plan.append(';');
+    plan.append(stepType).append(':').append(tableName);
+    for (Object keyPart : keyParts) plan.append(':').append(keyPart);
   }
 
   private Integer getOrderId(Connection conn, int w_id, int d_id) throws SQLException {
