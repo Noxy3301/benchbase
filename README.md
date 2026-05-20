@@ -2,6 +2,13 @@
 
 [![BenchBase (Java with Maven)](https://github.com/cmu-db/benchbase/actions/workflows/maven.yml/badge.svg?branch=main)](https://github.com/cmu-db/benchbase/actions/workflows/maven.yml)
 
+> [!NOTE]
+> **`research/helios` branch** — patched for [Noxy3301/helios](https://github.com/Noxy3301/helios).
+>
+> Changes from upstream `main`:
+> - **OCC commit-conflict retry** (`api/Worker.java`, `tpcc/TPCCLoader.java`) — `Worker.isRetryable()` recognizes MySQL error 1180 with `"Got error 149"` (`HA_ERR_LOCK_DEADLOCK`) as transient, and `TPCCLoader.loadStock()` adds batch-level retry so parallel STOCK bulk-load survives the same deadlocks.
+> - **TPC-C oneshot plan injection** (`tpcc/procedures/*.java`) — when the `HELIOS_ONESHOT_PLAN` environment variable is set, each procedure builds a Helios DSL plan via `SET @_ldb_plan` and the SQLStmts append `FORCE INDEX (...)` hints to keep MySQL's access path aligned with the DSL plan; with the flag unset, SQL falls back to the upstream form.
+
 BenchBase (formerly [OLTPBench](https://github.com/oltpbenchmark/oltpbench/)) is a Multi-DBMS SQL Benchmarking Framework via JDBC.
 
 **Table of Contents**
