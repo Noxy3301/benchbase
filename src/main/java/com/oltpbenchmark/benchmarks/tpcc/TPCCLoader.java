@@ -307,7 +307,8 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
           } catch (SQLException se) {
             stockPreparedStatement.clearBatch();
             // 1213 = ER_LOCK_DEADLOCK (standard MySQL deadlock).
-            // 1180 = ER_ERROR_DURING_COMMIT; "Got error 149" wraps HA_ERR_LOCK_DEADLOCK from OCC commit.
+            // 1180 = ER_ERROR_DURING_COMMIT; "Got error 149" wraps HA_ERR_LOCK_DEADLOCK from OCC
+            // commit.
             boolean retryable =
                 (se.getErrorCode() == 1213)
                     || (se.getErrorCode() == 1180
