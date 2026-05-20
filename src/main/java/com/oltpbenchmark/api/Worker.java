@@ -716,6 +716,13 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
     } else if (errorCode == 1205 && sqlState.equals("40001")) {
       // MySQL ER_LOCK_WAIT_TIMEOUT
       return true;
+    } else if (errorCode == 1180 && sqlState.equals("HY000")) {
+      // OCC commit-time deadlock: HA_ERR_LOCK_DEADLOCK (149) surfaced as
+      // ER_ERROR_DURING_COMMIT by MySQL's ha_commit_low().
+      String msg = ex.getMessage();
+      if (msg != null && msg.contains("Got error 149")) {
+        return true;
+      }
     }
 
     // ------------------

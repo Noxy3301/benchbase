@@ -241,61 +241,95 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
   protected void loadStock(Connection conn, int w_id, int numItems) {
 
     int k = 0;
+    int batchSize = workConf.getBatchSize();
+    int maxRetries = 20;
 
     try (PreparedStatement stockPreparedStatement =
         getInsertStatement(conn, TPCCConstants.TABLENAME_STOCK)) {
 
-      for (int i = 1; i <= numItems; i++) {
-        Stock stock = new Stock();
-        stock.s_i_id = i;
-        stock.s_w_id = w_id;
-        stock.s_quantity = TPCCUtil.randomNumber(10, 100, benchmark.rng());
-        stock.s_ytd = 0;
-        stock.s_order_cnt = 0;
-        stock.s_remote_cnt = 0;
+      for (int batchStart = 1; batchStart <= numItems; batchStart += batchSize) {
+        int batchEnd = Math.min(batchStart + batchSize - 1, numItems);
 
-        // s_data
-        int randPct = TPCCUtil.randomNumber(1, 100, benchmark.rng());
-        int len = TPCCUtil.randomNumber(26, 50, benchmark.rng());
-        if (randPct > 10) {
-          // 90% of time i_data isa random string of length [26 ..
-          // 50]
-          stock.s_data = TPCCUtil.randomStr(len);
-        } else {
-          // 10% of time i_data has "ORIGINAL" crammed somewhere
-          // in middle
-          int startORIGINAL = TPCCUtil.randomNumber(2, (len - 8), benchmark.rng());
-          stock.s_data =
-              TPCCUtil.randomStr(startORIGINAL - 1)
-                  + "ORIGINAL"
-                  + TPCCUtil.randomStr(len - startORIGINAL - 9);
-        }
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            for (int i = batchStart; i <= batchEnd; i++) {
+              Stock stock = new Stock();
+              stock.s_i_id = i;
+              stock.s_w_id = w_id;
+              stock.s_quantity = TPCCUtil.randomNumber(10, 100, benchmark.rng());
+              stock.s_ytd = 0;
+              stock.s_order_cnt = 0;
+              stock.s_remote_cnt = 0;
 
-        int idx = 1;
-        stockPreparedStatement.setLong(idx++, stock.s_w_id);
-        stockPreparedStatement.setLong(idx++, stock.s_i_id);
-        stockPreparedStatement.setLong(idx++, stock.s_quantity);
-        stockPreparedStatement.setDouble(idx++, stock.s_ytd);
-        stockPreparedStatement.setLong(idx++, stock.s_order_cnt);
-        stockPreparedStatement.setLong(idx++, stock.s_remote_cnt);
-        stockPreparedStatement.setString(idx++, stock.s_data);
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
-        stockPreparedStatement.setString(idx, TPCCUtil.randomStr(24));
-        stockPreparedStatement.addBatch();
+              // s_data
+              int randPct = TPCCUtil.randomNumber(1, 100, benchmark.rng());
+              int len = TPCCUtil.randomNumber(26, 50, benchmark.rng());
+              if (randPct > 10) {
+                // 90% of time i_data isa random string of length [26 ..
+                // 50]
+                stock.s_data = TPCCUtil.randomStr(len);
+              } else {
+                // 10% of time i_data has "ORIGINAL" crammed somewhere
+                // in middle
+                int startORIGINAL = TPCCUtil.randomNumber(2, (len - 8), benchmark.rng());
+                stock.s_data =
+                    TPCCUtil.randomStr(startORIGINAL - 1)
+                        + "ORIGINAL"
+                        + TPCCUtil.randomStr(len - startORIGINAL - 9);
+              }
 
-        k++;
+              int idx = 1;
+              stockPreparedStatement.setLong(idx++, stock.s_w_id);
+              stockPreparedStatement.setLong(idx++, stock.s_i_id);
+              stockPreparedStatement.setLong(idx++, stock.s_quantity);
+              stockPreparedStatement.setDouble(idx++, stock.s_ytd);
+              stockPreparedStatement.setLong(idx++, stock.s_order_cnt);
+              stockPreparedStatement.setLong(idx++, stock.s_remote_cnt);
+              stockPreparedStatement.setString(idx++, stock.s_data);
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
+              stockPreparedStatement.setString(idx, TPCCUtil.randomStr(24));
+              stockPreparedStatement.addBatch();
 
-        if (k != 0 && (k % workConf.getBatchSize()) == 0) {
-          stockPreparedStatement.executeBatch();
-          stockPreparedStatement.clearBatch();
+              k++;
+            }
+
+            stockPreparedStatement.executeBatch();
+            stockPreparedStatement.clearBatch();
+            break;
+          } catch (SQLException se) {
+            stockPreparedStatement.clearBatch();
+            // 1213 = ER_LOCK_DEADLOCK (standard MySQL deadlock).
+            // 1180 = ER_ERROR_DURING_COMMIT; "Got error 149" wraps HA_ERR_LOCK_DEADLOCK from OCC commit.
+            boolean retryable =
+                (se.getErrorCode() == 1213)
+                    || (se.getErrorCode() == 1180
+                        && se.getMessage() != null
+                        && se.getMessage().contains("Got error 149"));
+            if (retryable && attempt < maxRetries) {
+              LOG.warn(
+                  "loadStock w_id={} batch [{}-{}] deadlock, retry {}/{}",
+                  w_id,
+                  batchStart,
+                  batchEnd,
+                  attempt + 1,
+                  maxRetries);
+              try {
+                Thread.sleep(10L * (attempt + 1));
+              } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+              }
+            } else {
+              throw se;
+            }
+          }
         }
       }
 
