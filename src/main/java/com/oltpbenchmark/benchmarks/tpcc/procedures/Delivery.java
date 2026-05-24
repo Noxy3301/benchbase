@@ -201,10 +201,7 @@ public class Delivery extends TPCCProcedure {
       appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, w_id, d_id, "B" + (base + 1) + ".CI3");
     }
 
-    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
-      stmt.setString(1, plan.toString());
-      stmt.execute();
-    }
+    setLdbPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

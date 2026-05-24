@@ -353,10 +353,7 @@ public class Payment extends TPCCProcedure {
       appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, c_w_id, c_d_id, c_id);
     }
 
-    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
-      stmt.setString(1, plan.toString());
-      stmt.execute();
-    }
+    setLdbPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

@@ -203,10 +203,7 @@ public class NewOrder extends TPCCProcedure {
       appendPlanRead(plan, TPCCConstants.TABLENAME_STOCK, supplierWarehouseIDs[i], itemIDs[i]);
     }
 
-    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
-      stmt.setString(1, plan.toString());
-      stmt.execute();
-    }
+    setLdbPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, int... keyParts) {

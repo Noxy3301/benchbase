@@ -107,10 +107,7 @@ public class StockLevel extends TPCCProcedure {
         new Object[] {w_id, d_id, "B0.CI4"});
     appendPlanForEach(plan, TPCCConstants.TABLENAME_STOCK, w_id, "B1.CI4");
 
-    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
-      stmt.setString(1, plan.toString());
-      stmt.execute();
-    }
+    setLdbPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

@@ -216,10 +216,7 @@ public class OrderStatus extends TPCCProcedure {
       appendPlanScan(plan, TPCCConstants.TABLENAME_ORDERLINE, w_id, d_id, "B1.CI2");
     }
 
-    try (PreparedStatement stmt = conn.prepareStatement("SET @_ldb_plan = ?")) {
-      stmt.setString(1, plan.toString());
-      stmt.execute();
-    }
+    setLdbPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

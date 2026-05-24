@@ -21,6 +21,7 @@ import com.oltpbenchmark.api.Procedure;
 import com.oltpbenchmark.benchmarks.tpcc.TPCCWorker;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Random;
 
 public abstract class TPCCProcedure extends Procedure {
@@ -34,4 +35,24 @@ public abstract class TPCCProcedure extends Procedure {
       int terminalDistrictUpperID,
       TPCCWorker w)
       throws SQLException;
+
+  /**
+   * Set @_ldb_plan = '<plan>' on the connection via a plain Statement so the value reliably
+   * propagates to the next DML on the same connection.
+   *
+   * <p>Using PreparedStatement with parameter binding for SET @_ldb_plan = ? has been observed to
+   * occasionally not propagate the user variable to the next statement's THD when combined with the
+   * rewriteBatchedStatements=true JDBC option configured in bench/config/tpcc.xml. Bypassing the
+   * prepared-stmt path with a literal statement avoids that issue.
+   *
+   * <p>Single quotes in the plan text are escaped by doubling them ('' is the SQL-standard escape
+   * and works regardless of the NO_BACKSLASH_ESCAPES sql_mode). The plan grammar produced by the
+   * appendPlan* helpers does not contain backslashes, so no backslash handling is required.
+   */
+  protected static void setLdbPlanSession(Connection conn, String plan) throws SQLException {
+    String escaped = plan.replace("'", "''");
+    try (Statement stmt = conn.createStatement()) {
+      stmt.execute("SET @_ldb_plan = '" + escaped + "'");
+    }
+  }
 }
