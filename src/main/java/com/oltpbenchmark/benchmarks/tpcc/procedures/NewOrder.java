@@ -31,8 +31,8 @@ import org.slf4j.LoggerFactory;
 public class NewOrder extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(NewOrder.class);
-  private static final boolean HELIOS_ONESHOT_PLAN =
-      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
+  private static final boolean HELIOS_PREFETCH_PLAN =
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
 
   public final SQLStmt stmtGetCustSQL =
       new SQLStmt(
@@ -111,7 +111,7 @@ public class NewOrder extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_STOCK,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public final SQLStmt stmtUpdateStockSQL =
       new SQLStmt(
@@ -126,7 +126,7 @@ public class NewOrder extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_STOCK,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public final SQLStmt stmtInsertOrderLineSQL =
       new SQLStmt(
@@ -174,8 +174,8 @@ public class NewOrder extends TPCCProcedure {
       itemIDs[numItems - 1] = TPCCConfig.INVALID_ITEM_ID;
     }
 
-    if (HELIOS_ONESHOT_PLAN) {
-      setOrdoOneshotPlan(
+    if (HELIOS_PREFETCH_PLAN) {
+      setPrefetchPlan(
           conn, terminalWarehouseID, districtID, customerID, itemIDs, supplierWarehouseIDs);
     }
 
@@ -191,7 +191,7 @@ public class NewOrder extends TPCCProcedure {
         conn);
   }
 
-  private void setOrdoOneshotPlan(
+  private void setPrefetchPlan(
       Connection conn, int w_id, int d_id, int c_id, int[] itemIDs, int[] supplierWarehouseIDs)
       throws SQLException {
     StringBuilder plan = new StringBuilder();
@@ -203,7 +203,7 @@ public class NewOrder extends TPCCProcedure {
       appendPlanRead(plan, TPCCConstants.TABLENAME_STOCK, supplierWarehouseIDs[i], itemIDs[i]);
     }
 
-    setLdbPlanSession(conn, plan.toString());
+    setPrefetchPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, int... keyParts) {

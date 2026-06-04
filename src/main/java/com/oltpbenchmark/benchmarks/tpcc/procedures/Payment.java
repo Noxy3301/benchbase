@@ -35,8 +35,8 @@ import org.slf4j.LoggerFactory;
 public class Payment extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(Payment.class);
-  private static final boolean HELIOS_ONESHOT_PLAN =
-      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
+  private static final boolean HELIOS_PREFETCH_PLAN =
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
 
   public SQLStmt payUpdateWhseSQL =
       new SQLStmt(
@@ -89,7 +89,7 @@ public class Payment extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_CUSTOMER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payGetCustCdataSQL =
       new SQLStmt(
@@ -102,7 +102,7 @@ public class Payment extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_CUSTOMER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payUpdateCustBalCdataSQL =
       new SQLStmt(
@@ -118,7 +118,7 @@ public class Payment extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_CUSTOMER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payUpdateCustBalSQL =
       new SQLStmt(
@@ -133,7 +133,7 @@ public class Payment extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_CUSTOMER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payInsertHistSQL =
       new SQLStmt(
@@ -187,8 +187,8 @@ public class Payment extends TPCCProcedure {
       customerID = TPCCUtil.getCustomerID(gen);
     }
 
-    if (HELIOS_ONESHOT_PLAN) {
-      setOrdoOneshotPlan(
+    if (HELIOS_PREFETCH_PLAN) {
+      setPrefetchPlan(
           conn,
           w_id,
           districtID,
@@ -327,7 +327,7 @@ public class Payment extends TPCCProcedure {
     }
   }
 
-  private void setOrdoOneshotPlan(
+  private void setPrefetchPlan(
       Connection conn,
       int w_id,
       int d_id,
@@ -353,7 +353,7 @@ public class Payment extends TPCCProcedure {
       appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, c_w_id, c_d_id, c_id);
     }
 
-    setLdbPlanSession(conn, plan.toString());
+    setPrefetchPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

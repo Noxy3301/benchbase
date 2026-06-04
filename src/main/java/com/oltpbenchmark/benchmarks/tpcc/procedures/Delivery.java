@@ -31,8 +31,8 @@ import org.slf4j.LoggerFactory;
 public class Delivery extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(Delivery.class);
-  private static final boolean HELIOS_ONESHOT_PLAN =
-      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
+  private static final boolean HELIOS_PREFETCH_PLAN =
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
 
   public SQLStmt delivGetOrderIdSQL =
       new SQLStmt(
@@ -65,7 +65,7 @@ public class Delivery extends TPCCProcedure {
         """
               .formatted(
                   TPCCConstants.TABLENAME_OPENORDER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivUpdateCarrierIdSQL =
       new SQLStmt(
@@ -78,7 +78,7 @@ public class Delivery extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_OPENORDER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivUpdateDeliveryDateSQL =
       new SQLStmt(
@@ -91,7 +91,7 @@ public class Delivery extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_ORDERLINE,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivSumOrderAmountSQL =
       new SQLStmt(
@@ -104,7 +104,7 @@ public class Delivery extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_ORDERLINE,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt delivUpdateCustBalDelivCntSQL =
       new SQLStmt(
@@ -118,7 +118,7 @@ public class Delivery extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_CUSTOMER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public void run(
       Connection conn,
@@ -136,8 +136,8 @@ public class Delivery extends TPCCProcedure {
 
     int[] orderIDs = new int[10];
 
-    if (HELIOS_ONESHOT_PLAN) {
-      setOrdoOneshotPlan(conn, w_id, terminalDistrictUpperID);
+    if (HELIOS_PREFETCH_PLAN) {
+      setPrefetchPlan(conn, w_id, terminalDistrictUpperID);
     }
 
     for (d_id = 1; d_id <= terminalDistrictUpperID; d_id++) {
@@ -189,7 +189,7 @@ public class Delivery extends TPCCProcedure {
     }
   }
 
-  private void setOrdoOneshotPlan(Connection conn, int w_id, int terminalDistrictUpperID)
+  private void setPrefetchPlan(Connection conn, int w_id, int terminalDistrictUpperID)
       throws SQLException {
     StringBuilder plan = new StringBuilder();
     for (int d_id = 1; d_id <= terminalDistrictUpperID; d_id++) {
@@ -201,7 +201,7 @@ public class Delivery extends TPCCProcedure {
       appendPlanRead(plan, TPCCConstants.TABLENAME_CUSTOMER, w_id, d_id, "B" + (base + 1) + ".CI3");
     }
 
-    setLdbPlanSession(conn, plan.toString());
+    setPrefetchPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

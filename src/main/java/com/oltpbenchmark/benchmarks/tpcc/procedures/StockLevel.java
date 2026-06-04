@@ -32,8 +32,8 @@ import org.slf4j.LoggerFactory;
 public class StockLevel extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(StockLevel.class);
-  private static final boolean HELIOS_ONESHOT_PLAN =
-      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
+  private static final boolean HELIOS_PREFETCH_PLAN =
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
 
   public SQLStmt stockGetDistOrderIdSQL =
       new SQLStmt(
@@ -73,8 +73,8 @@ public class StockLevel extends TPCCProcedure {
     int threshold = TPCCUtil.randomNumber(10, 20, gen);
     int d_id = TPCCUtil.randomNumber(terminalDistrictLowerID, terminalDistrictUpperID, gen);
 
-    if (HELIOS_ONESHOT_PLAN) {
-      setOrdoOneshotPlan(conn, w_id, d_id);
+    if (HELIOS_PREFETCH_PLAN) {
+      setPrefetchPlan(conn, w_id, d_id);
     }
 
     int o_id = getOrderId(conn, w_id, d_id);
@@ -97,7 +97,7 @@ public class StockLevel extends TPCCProcedure {
     }
   }
 
-  private void setOrdoOneshotPlan(Connection conn, int w_id, int d_id) throws SQLException {
+  private void setPrefetchPlan(Connection conn, int w_id, int d_id) throws SQLException {
     StringBuilder plan = new StringBuilder();
     appendPlanRead(plan, TPCCConstants.TABLENAME_DISTRICT, w_id, d_id);
     appendPlanRange(
@@ -107,7 +107,7 @@ public class StockLevel extends TPCCProcedure {
         new Object[] {w_id, d_id, "B0.CI4"});
     appendPlanForEach(plan, TPCCConstants.TABLENAME_STOCK, w_id, "B1.CI4");
 
-    setLdbPlanSession(conn, plan.toString());
+    setPrefetchPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {

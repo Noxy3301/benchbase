@@ -36,8 +36,8 @@ import org.slf4j.LoggerFactory;
 public class OrderStatus extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(OrderStatus.class);
-  private static final boolean HELIOS_ONESHOT_PLAN =
-      "1".equals(System.getenv("HELIOS_ONESHOT_PLAN")) || Boolean.getBoolean("helios.oneshotPlan");
+  private static final boolean HELIOS_PREFETCH_PLAN =
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
 
   public SQLStmt ordStatGetNewestOrdSQL =
       new SQLStmt(
@@ -51,7 +51,7 @@ public class OrderStatus extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_OPENORDER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (o_w_id)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (o_w_id)" : ""));
 
   public SQLStmt ordStatGetOrderLinesSQL =
       new SQLStmt(
@@ -64,7 +64,7 @@ public class OrderStatus extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_ORDERLINE,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt payGetCustSQL =
       new SQLStmt(
@@ -79,7 +79,7 @@ public class OrderStatus extends TPCCProcedure {
     """
               .formatted(
                   TPCCConstants.TABLENAME_CUSTOMER,
-                  HELIOS_ONESHOT_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
+                  HELIOS_PREFETCH_PLAN ? "FORCE INDEX (PRIMARY)" : ""));
 
   public SQLStmt customerByNameSQL =
       new SQLStmt(
@@ -120,8 +120,8 @@ public class OrderStatus extends TPCCProcedure {
       c_id = TPCCUtil.getCustomerID(gen);
     }
 
-    if (HELIOS_ONESHOT_PLAN) {
-      setOrdoOneshotPlan(conn, w_id, d_id, c_by_name, c_last, c_id);
+    if (HELIOS_PREFETCH_PLAN) {
+      setPrefetchPlan(conn, w_id, d_id, c_by_name, c_last, c_id);
     }
 
     Customer c;
@@ -184,7 +184,7 @@ public class OrderStatus extends TPCCProcedure {
     }
   }
 
-  private void setOrdoOneshotPlan(
+  private void setPrefetchPlan(
       Connection conn, int w_id, int d_id, boolean customerByName, String c_last, int c_id)
       throws SQLException {
     StringBuilder plan = new StringBuilder();
@@ -216,7 +216,7 @@ public class OrderStatus extends TPCCProcedure {
       appendPlanScan(plan, TPCCConstants.TABLENAME_ORDERLINE, w_id, d_id, "B1.CI2");
     }
 
-    setLdbPlanSession(conn, plan.toString());
+    setPrefetchPlanSession(conn, plan.toString());
   }
 
   private void appendPlanRead(StringBuilder plan, String tableName, Object... keyParts) {
