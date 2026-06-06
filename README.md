@@ -7,7 +7,7 @@
 >
 > Changes from upstream `main`:
 > - **OCC commit-conflict retry** (`api/Worker.java`, `tpcc/TPCCLoader.java`) — `Worker.isRetryable()` recognizes MySQL error 1180 with `"Got error 149"` (`HA_ERR_LOCK_DEADLOCK`) as transient, and `TPCCLoader.loadStock()` adds batch-level retry so parallel STOCK bulk-load survives the same deadlocks.
-> - **TPC-C prefetch plan injection** (`tpcc/procedures/*.java`) — when the `HELIOS_PREFETCH_PLAN` environment variable is set, each procedure builds a Helios DSL plan via `SET @_prefetch_plan` and the SQLStmts append `FORCE INDEX (...)` hints to keep MySQL's access path aligned with the DSL plan; with the flag unset, SQL falls back to the upstream form.
+> - **TPC-C prefetch plan injection** (`tpcc/procedures/*.java`) — when the `HELIOS_PREFETCH_PLAN` environment variable is set, each procedure builds a Helios DSL plan via `SET @_tx_plan` and the SQLStmts append `FORCE INDEX (...)` hints to keep MySQL's access path aligned with the DSL plan; with the flag unset, SQL falls back to the upstream form.
 
 BenchBase (formerly [OLTPBench](https://github.com/oltpbenchmark/oltpbench/)) is a Multi-DBMS SQL Benchmarking Framework via JDBC.
 
