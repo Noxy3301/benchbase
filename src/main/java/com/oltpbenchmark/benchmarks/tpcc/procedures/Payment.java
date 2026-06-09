@@ -36,7 +36,8 @@ public class Payment extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(Payment.class);
   private static final boolean HELIOS_PREFETCH_PLAN =
-      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN"))
+          || Boolean.getBoolean("helios.prefetchPlan");
 
   public SQLStmt payUpdateWhseSQL =
       new SQLStmt(

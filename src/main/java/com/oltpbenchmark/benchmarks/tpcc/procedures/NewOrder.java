@@ -32,7 +32,8 @@ public class NewOrder extends TPCCProcedure {
 
   private static final Logger LOG = LoggerFactory.getLogger(NewOrder.class);
   private static final boolean HELIOS_PREFETCH_PLAN =
-      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN")) || Boolean.getBoolean("helios.prefetchPlan");
+      "1".equals(System.getenv("HELIOS_PREFETCH_PLAN"))
+          || Boolean.getBoolean("helios.prefetchPlan");
 
   public final SQLStmt stmtGetCustSQL =
       new SQLStmt(
