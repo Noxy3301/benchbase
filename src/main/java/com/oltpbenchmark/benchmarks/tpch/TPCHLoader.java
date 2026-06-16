@@ -152,15 +152,38 @@ public final class TPCHLoader extends Loader<TPCHBenchmark> {
   public List<LoaderThread> createLoaderThreads() {
     List<LoaderThread> threads = new ArrayList<>();
 
+    // Shard count for the big tables. Default = available cores; override with
+    // -Dtpch.load.shards=N. The TPC-H generators take a deterministic (part,
+    // partCount) chunk, so N shards produce the exact same dataset as one.
+    final int n =
+        Math.max(
+            1, Integer.getInteger("tpch.load.shards", Runtime.getRuntime().availableProcessors()));
+
+    // A parent latch is sized to its table's shard count, so a child table
+    // starts only after ALL parent shards finish. Big tables use n shards;
+    // tiny tables (region/nation/supplier) stay single-sharded.
     final CountDownLatch regionLatch = new CountDownLatch(1);
     final CountDownLatch nationLatch = new CountDownLatch(1);
-    final CountDownLatch ordersLatch = new CountDownLatch(1);
-    final CountDownLatch customerLatch = new CountDownLatch(1);
-    final CountDownLatch partsLatch = new CountDownLatch(1);
+    final CountDownLatch ordersLatch = new CountDownLatch(n);
+    final CountDownLatch customerLatch = new CountDownLatch(n);
+    final CountDownLatch partsLatch = new CountDownLatch(n);
     final CountDownLatch supplierLatch = new CountDownLatch(1);
-    final CountDownLatch partsSuppLatch = new CountDownLatch(1);
+    final CountDownLatch partsSuppLatch = new CountDownLatch(n);
 
     final double scaleFactor = this.workConf.getScaleFactor();
+
+    // A loader pool (loaderThreads) smaller than 3 + 5*n stays correct (parents
+    // are queued before children in a FIFO pool) but loses parallelism at FK
+    // barriers; warn so the user raises <loaderThreads>.
+    final int totalThreads = 3 + 5 * n;
+    if (this.workConf.getLoaderThreads() < totalThreads) {
+      LOG.warn(
+          "tpch.load.shards={} needs loaderThreads >= {} to use every core (have {}); the load is"
+              + " correct but loses parallelism at FK barriers. Raise <loaderThreads>.",
+          n,
+          totalThreads,
+          this.workConf.getLoaderThreads());
+    }
 
     threads.add(
         new LoaderThread(this.benchmark) {
@@ -180,23 +203,26 @@ public final class TPCHLoader extends Loader<TPCHBenchmark> {
           }
         });
 
-    threads.add(
-        new LoaderThread(this.benchmark) {
-          @Override
-          public void load(Connection conn) throws SQLException {
-            try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_PART)) {
-              List<Iterable<List<Object>>> partGenerators = new ArrayList<>();
-              partGenerators.add(new PartGenerator(scaleFactor, 1, 1));
+    for (int s = 1; s <= n; s++) {
+      final int part = s;
+      threads.add(
+          new LoaderThread(this.benchmark) {
+            @Override
+            public void load(Connection conn) throws SQLException {
+              try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_PART)) {
+                List<Iterable<List<Object>>> partGenerators = new ArrayList<>();
+                partGenerators.add(new PartGenerator(scaleFactor, part, n));
 
-              genTable(conn, statement, partGenerators, partTypes, TABLENAME_PART);
+                genTable(conn, statement, partGenerators, partTypes, TABLENAME_PART);
+              }
             }
-          }
 
-          @Override
-          public void afterLoad() {
-            partsLatch.countDown();
-          }
-        });
+            @Override
+            public void afterLoad() {
+              partsLatch.countDown();
+            }
+          });
+    }
 
     threads.add(
         new LoaderThread(this.benchmark) {
@@ -252,110 +278,122 @@ public final class TPCHLoader extends Loader<TPCHBenchmark> {
           }
         });
 
-    threads.add(
-        new LoaderThread(this.benchmark) {
-          @Override
-          public void load(Connection conn) throws SQLException {
-            try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_CUSTOMER)) {
-              List<Iterable<List<Object>>> customerGenerators = new ArrayList<>();
-              customerGenerators.add(new CustomerGenerator(scaleFactor, 1, 1));
+    for (int s = 1; s <= n; s++) {
+      final int part = s;
+      threads.add(
+          new LoaderThread(this.benchmark) {
+            @Override
+            public void load(Connection conn) throws SQLException {
+              try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_CUSTOMER)) {
+                List<Iterable<List<Object>>> customerGenerators = new ArrayList<>();
+                customerGenerators.add(new CustomerGenerator(scaleFactor, part, n));
 
-              genTable(conn, statement, customerGenerators, customerTypes, TABLENAME_CUSTOMER);
+                genTable(conn, statement, customerGenerators, customerTypes, TABLENAME_CUSTOMER);
+              }
             }
-          }
 
-          @Override
-          public void beforeLoad() {
-            try {
-              nationLatch.await();
-            } catch (InterruptedException e) {
-              throw new RuntimeException(e);
+            @Override
+            public void beforeLoad() {
+              try {
+                nationLatch.await();
+              } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+              }
             }
-          }
 
-          @Override
-          public void afterLoad() {
-            customerLatch.countDown();
-          }
-        });
-
-    threads.add(
-        new LoaderThread(this.benchmark) {
-          @Override
-          public void load(Connection conn) throws SQLException {
-            try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_ORDER)) {
-              List<Iterable<List<Object>>> orderGenerators = new ArrayList<>();
-              orderGenerators.add(new OrderGenerator(scaleFactor, 1, 1));
-
-              genTable(conn, statement, orderGenerators, ordersTypes, TABLENAME_ORDER);
+            @Override
+            public void afterLoad() {
+              customerLatch.countDown();
             }
-          }
+          });
+    }
 
-          @Override
-          public void beforeLoad() {
-            try {
-              customerLatch.await();
-            } catch (InterruptedException e) {
-              throw new RuntimeException(e);
+    for (int s = 1; s <= n; s++) {
+      final int part = s;
+      threads.add(
+          new LoaderThread(this.benchmark) {
+            @Override
+            public void load(Connection conn) throws SQLException {
+              try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_ORDER)) {
+                List<Iterable<List<Object>>> orderGenerators = new ArrayList<>();
+                orderGenerators.add(new OrderGenerator(scaleFactor, part, n));
+
+                genTable(conn, statement, orderGenerators, ordersTypes, TABLENAME_ORDER);
+              }
             }
-          }
 
-          @Override
-          public void afterLoad() {
-            ordersLatch.countDown();
-          }
-        });
-
-    threads.add(
-        new LoaderThread(this.benchmark) {
-          @Override
-          public void load(Connection conn) throws SQLException {
-            try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_PARTSUPP)) {
-              List<Iterable<List<Object>>> partSuppGenerators = new ArrayList<>();
-              partSuppGenerators.add(new PartSupplierGenerator(scaleFactor, 1, 1));
-
-              genTable(conn, statement, partSuppGenerators, partsuppTypes, TABLENAME_PARTSUPP);
+            @Override
+            public void beforeLoad() {
+              try {
+                customerLatch.await();
+              } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+              }
             }
-          }
 
-          @Override
-          public void beforeLoad() {
-            try {
-              partsLatch.await();
-              supplierLatch.await();
-            } catch (InterruptedException e) {
-              throw new RuntimeException(e);
+            @Override
+            public void afterLoad() {
+              ordersLatch.countDown();
             }
-          }
+          });
+    }
 
-          @Override
-          public void afterLoad() {
-            partsSuppLatch.countDown();
-          }
-        });
+    for (int s = 1; s <= n; s++) {
+      final int part = s;
+      threads.add(
+          new LoaderThread(this.benchmark) {
+            @Override
+            public void load(Connection conn) throws SQLException {
+              try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_PARTSUPP)) {
+                List<Iterable<List<Object>>> partSuppGenerators = new ArrayList<>();
+                partSuppGenerators.add(new PartSupplierGenerator(scaleFactor, part, n));
 
-    threads.add(
-        new LoaderThread(this.benchmark) {
-          @Override
-          public void load(Connection conn) throws SQLException {
-            try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_LINEITEM)) {
-              List<Iterable<List<Object>>> lineItemGenerators = new ArrayList<>();
-              lineItemGenerators.add(new LineItemGenerator(scaleFactor, 1, 1));
-
-              genTable(conn, statement, lineItemGenerators, lineitemTypes, TABLENAME_LINEITEM);
+                genTable(conn, statement, partSuppGenerators, partsuppTypes, TABLENAME_PARTSUPP);
+              }
             }
-          }
 
-          @Override
-          public void beforeLoad() {
-            try {
-              ordersLatch.await();
-              partsSuppLatch.await();
-            } catch (InterruptedException e) {
-              throw new RuntimeException(e);
+            @Override
+            public void beforeLoad() {
+              try {
+                partsLatch.await();
+                supplierLatch.await();
+              } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+              }
             }
-          }
-        });
+
+            @Override
+            public void afterLoad() {
+              partsSuppLatch.countDown();
+            }
+          });
+    }
+
+    for (int s = 1; s <= n; s++) {
+      final int part = s;
+      threads.add(
+          new LoaderThread(this.benchmark) {
+            @Override
+            public void load(Connection conn) throws SQLException {
+              try (PreparedStatement statement = getInsertStatement(conn, TABLENAME_LINEITEM)) {
+                List<Iterable<List<Object>>> lineItemGenerators = new ArrayList<>();
+                lineItemGenerators.add(new LineItemGenerator(scaleFactor, part, n));
+
+                genTable(conn, statement, lineItemGenerators, lineitemTypes, TABLENAME_LINEITEM);
+              }
+            }
+
+            @Override
+            public void beforeLoad() {
+              try {
+                ordersLatch.await();
+                partsSuppLatch.await();
+              } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+              }
+            }
+          });
+    }
 
     return threads;
   }
@@ -403,7 +441,12 @@ public final class TPCHLoader extends Loader<TPCHBenchmark> {
 
         prepStmt.executeBatch();
       } catch (Exception e) {
-        LOG.error(e.getMessage(), e);
+        // Do not swallow: a failed batch must abort the load. The rethrow
+        // escapes to ThreadUtil.LatchRunnable, which calls System.exit(1) and
+        // aborts the process; without it the load completes silently against a
+        // partial parent, which Helios cannot detect (no FK checks).
+        LOG.error("loader failed for table {}: {}", tableName, e.getMessage(), e);
+        throw new RuntimeException("loader failed for table " + tableName, e);
       }
     }
   }
