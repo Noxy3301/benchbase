@@ -32,7 +32,7 @@ public class GetSubscriberData extends Procedure {
 
   public void run(Connection conn, long s_id) throws SQLException {
     try (PreparedStatement stmt = this.getPreparedStatement(conn, getSubscriber)) {
-      stmt.setLong(1, s_id);
+      stmt.setInt(1, (int) s_id);
       try (ResultSet results = stmt.executeQuery()) {
         assert results != null;
       }

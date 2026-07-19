@@ -53,7 +53,7 @@ public class InsertCallForwarding extends Procedure {
     }
 
     try (PreparedStatement stmt = this.getPreparedStatement(conn, getSpecialFacility)) {
-      stmt.setLong(1, s_id);
+      stmt.setInt(1, (int) s_id);
       try (ResultSet results = stmt.executeQuery()) {
         assert results != null;
       }
@@ -64,10 +64,10 @@ public class InsertCallForwarding extends Procedure {
     int rows_updated = -1;
 
     try (PreparedStatement stmt = this.getPreparedStatement(conn, insertCallForwarding)) {
-      stmt.setLong(1, s_id);
-      stmt.setByte(2, sf_type);
-      stmt.setByte(3, start_time);
-      stmt.setByte(4, end_time);
+      stmt.setInt(1, (int) s_id);
+      stmt.setInt(2, sf_type);
+      stmt.setInt(3, start_time);
+      stmt.setInt(4, end_time);
       stmt.setString(5, numberx);
 
       try {

@@ -35,8 +35,8 @@ public class GetAccessData extends Procedure {
 
   public void run(Connection conn, long s_id, byte ai_type) throws SQLException {
     try (PreparedStatement stmt = this.getPreparedStatement(conn, getAccessInfo)) {
-      stmt.setLong(1, s_id);
-      stmt.setByte(2, ai_type);
+      stmt.setInt(1, (int) s_id);
+      stmt.setInt(2, ai_type);
       try (ResultSet results = stmt.executeQuery()) {
         assert results != null;
       }

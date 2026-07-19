@@ -40,15 +40,15 @@ public class UpdateSubscriberData extends Procedure {
     int updated;
 
     try (PreparedStatement stmt = this.getPreparedStatement(conn, updateSubscriber)) {
-      stmt.setByte(1, bit_1);
-      stmt.setLong(2, s_id);
+      stmt.setInt(1, bit_1);
+      stmt.setInt(2, (int) s_id);
       updated = stmt.executeUpdate();
     }
 
     try (PreparedStatement stmt = this.getPreparedStatement(conn, updateSpecialFacility)) {
-      stmt.setShort(1, data_a);
-      stmt.setLong(2, s_id);
-      stmt.setByte(3, sf_type);
+      stmt.setInt(1, data_a);
+      stmt.setInt(2, (int) s_id);
+      stmt.setInt(3, sf_type);
       updated = stmt.executeUpdate();
     }
     if (updated != 0) {

@@ -52,9 +52,9 @@ public class DeleteCallForwarding extends Procedure {
     int rows_updated = -1;
 
     try (PreparedStatement stmt = this.getPreparedStatement(conn, updateCallForwarding)) {
-      stmt.setLong(1, s_id);
-      stmt.setByte(2, sf_type);
-      stmt.setByte(3, start_time);
+      stmt.setInt(1, (int) s_id);
+      stmt.setInt(2, sf_type);
+      stmt.setInt(3, start_time);
       rows_updated = stmt.executeUpdate();
     }
 

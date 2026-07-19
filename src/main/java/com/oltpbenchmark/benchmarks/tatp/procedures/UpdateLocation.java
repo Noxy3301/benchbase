@@ -43,7 +43,7 @@ public class UpdateLocation extends Procedure {
           long s_id = results.getLong(1);
           try (PreparedStatement stmt2 = this.getPreparedStatement(conn, updateSubscriber)) {
             stmt2.setInt(1, location);
-            stmt2.setLong(2, s_id);
+            stmt2.setInt(2, (int) s_id);
             return stmt2.executeUpdate();
           }
         }

@@ -119,20 +119,20 @@ public final class TATPLoader extends Loader<TATPBenchmark> {
       for (long s_id = lo; s_id <= hi; s_id++) {
         int col = 0;
 
-        pstmt.setLong(++col, s_id);
+        pstmt.setInt(++col, (int) s_id);
         pstmt.setString(++col, TATPUtil.padWithZero(s_id));
 
         // BIT_##
         for (int j = 0; j < 10; j++) {
-          pstmt.setByte(++col, TATPUtil.number(0, 1).byteValue());
+          pstmt.setInt(++col, TATPUtil.number(0, 1).byteValue());
         }
         // HEX_##
         for (int j = 0; j < 10; j++) {
-          pstmt.setByte(++col, TATPUtil.number(0, 15).byteValue());
+          pstmt.setInt(++col, TATPUtil.number(0, 15).byteValue());
         }
         // BYTE2_##
         for (int j = 0; j < 10; j++) {
-          pstmt.setShort(++col, TATPUtil.number(0, 255).shortValue());
+          pstmt.setInt(++col, TATPUtil.number(0, 255).shortValue());
         }
         // msc_location + vlr_location
         for (int j = 0; j < 2; j++) {
@@ -175,10 +175,10 @@ public final class TATPLoader extends Loader<TATPBenchmark> {
       while (s_id++ < subscriberSize) {
         for (int ai_type : ai_types) {
           int col = 0;
-          pstmt.setLong(++col, s_id);
-          pstmt.setByte(++col, (byte) ai_type);
-          pstmt.setShort(++col, TATPUtil.number(0, 255).shortValue());
-          pstmt.setShort(++col, TATPUtil.number(0, 255).shortValue());
+          pstmt.setInt(++col, s_id);
+          pstmt.setInt(++col, (byte) ai_type);
+          pstmt.setInt(++col, TATPUtil.number(0, 255).shortValue());
+          pstmt.setInt(++col, TATPUtil.number(0, 255).shortValue());
           pstmt.setString(++col, TATPUtil.astring(3, 3));
           pstmt.setString(++col, TATPUtil.astring(5, 5));
           pstmt.addBatch();
@@ -240,11 +240,11 @@ public final class TATPLoader extends Loader<TATPBenchmark> {
         int[] sf_types = TATPUtil.subArr(spe_arr, 1, 4);
         for (int sf_type : sf_types) {
           int spe_col = 0;
-          spe_pstmt.setLong(++spe_col, s_id);
-          spe_pstmt.setByte(++spe_col, (byte) sf_type);
-          spe_pstmt.setByte(++spe_col, TATPUtil.isActive());
-          spe_pstmt.setShort(++spe_col, TATPUtil.number(0, 255).shortValue());
-          spe_pstmt.setShort(++spe_col, TATPUtil.number(0, 255).shortValue());
+          spe_pstmt.setInt(++spe_col, s_id);
+          spe_pstmt.setInt(++spe_col, (byte) sf_type);
+          spe_pstmt.setInt(++spe_col, TATPUtil.isActive());
+          spe_pstmt.setInt(++spe_col, TATPUtil.number(0, 255).shortValue());
+          spe_pstmt.setInt(++spe_col, TATPUtil.number(0, 255).shortValue());
           spe_pstmt.setString(++spe_col, TATPUtil.astring(5, 5));
           spe_pstmt.addBatch();
           spe_batch++;
@@ -254,10 +254,10 @@ public final class TATPLoader extends Loader<TATPBenchmark> {
           int[] start_times = TATPUtil.subArr(cal_arr, 0, 3);
           for (int start_time : start_times) {
             int cal_col = 0;
-            cal_pstmt.setLong(++cal_col, s_id);
-            cal_pstmt.setByte(++cal_col, (byte) sf_type);
-            cal_pstmt.setByte(++cal_col, (byte) start_time);
-            cal_pstmt.setByte(++cal_col, (byte) (start_time + TATPUtil.number(1, 8)));
+            cal_pstmt.setInt(++cal_col, s_id);
+            cal_pstmt.setInt(++cal_col, (byte) sf_type);
+            cal_pstmt.setInt(++cal_col, (byte) start_time);
+            cal_pstmt.setInt(++cal_col, (byte) (start_time + TATPUtil.number(1, 8)));
             cal_pstmt.setString(++cal_col, TATPUtil.nstring(15, 15));
             cal_pstmt.addBatch();
             cal_added = true;

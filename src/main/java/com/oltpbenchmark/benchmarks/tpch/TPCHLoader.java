@@ -38,7 +38,10 @@ import com.oltpbenchmark.benchmarks.tpch.util.PartSupplierGenerator;
 import com.oltpbenchmark.benchmarks.tpch.util.RegionGenerator;
 import com.oltpbenchmark.benchmarks.tpch.util.SupplierGenerator;
 import com.oltpbenchmark.catalog.Table;
+import com.oltpbenchmark.types.DatabaseType;
 import com.oltpbenchmark.util.SQLUtil;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -412,7 +415,15 @@ public final class TPCHLoader extends Loader<TPCHBenchmark> {
             final CastTypes type = types[idx];
             switch (type) {
               case DOUBLE:
-                prepStmt.setDouble(idx + 1, (Double) elems.get(idx));
+                if (this.getDatabaseType() == DatabaseType.TSURUGI) {
+                  // Tsurugi DECIMAL columns reject double binds and precision-losing values.
+                  prepStmt.setBigDecimal(
+                      idx + 1,
+                      BigDecimal.valueOf((Double) elems.get(idx))
+                          .setScale(2, RoundingMode.HALF_UP));
+                } else {
+                  prepStmt.setDouble(idx + 1, (Double) elems.get(idx));
+                }
                 break;
               case LONG:
                 prepStmt.setLong(idx + 1, (Long) elems.get(idx));
