@@ -32,6 +32,7 @@ import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.SQLRecoverableException;
+import java.sql.SQLTransactionRollbackException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.HashMap;
@@ -692,6 +693,13 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
     }
 
     if (ex instanceof SQLRecoverableException) {
+      return true;
+    }
+
+    // Standard JDBC serialization failure. Tsurugi's OCC aborts arrive as
+    // SQLTransactionRollbackException/40001 with a NONZERO vendor code, so the
+    // errorCode==0 fallback at the bottom never matches them.
+    if (ex instanceof SQLTransactionRollbackException && sqlState.equals("40001")) {
       return true;
     }
 
