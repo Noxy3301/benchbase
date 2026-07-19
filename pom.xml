@@ -108,6 +108,26 @@
                 </dependency>
             </dependencies>
         </profile>
+        <profile>
+            <id>tsurugi</id>
+            <activation>
+                <property>
+                    <name>env.BENCHBASE_PROFILE</name>
+                    <value>tsurugi</value>
+                </property>
+            </activation>
+            <properties>
+                <classifier>tsurugi</classifier>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>com.tsurugidb.jdbc</groupId>
+                    <artifactId>tsurugi-jdbc</artifactId>
+                    <version>0.5.0</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
         <!-- Oracle DB driver needed in profile compilation -->
         <profile>
             <id>oracle</id>
@@ -532,6 +552,7 @@
                                 <ignoredUnusedDeclaredDependency>org.apache.phoenix:phoenix-client-hbase-2.4:jar</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>com.microsoft.sqlserver:mssql-jdbc:jar</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.xerial:sqlite-jdbc:jar</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>com.tsurugidb.jdbc:tsurugi-jdbc:jar</ignoredUnusedDeclaredDependency>
                             </ignoredUnusedDeclaredDependencies>
                         </configuration>
                     </execution>

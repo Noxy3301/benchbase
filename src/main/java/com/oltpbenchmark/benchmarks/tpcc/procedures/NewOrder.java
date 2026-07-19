@@ -266,7 +266,7 @@ public class NewOrder extends TPCCProcedure {
         stmtInsertOrderLine.setInt(5, ol_i_id);
         stmtInsertOrderLine.setInt(6, ol_supply_w_id);
         stmtInsertOrderLine.setInt(7, ol_quantity);
-        stmtInsertOrderLine.setDouble(8, ol_amount);
+        setDecimal(stmtInsertOrderLine, 8, ol_amount, 2);
         stmtInsertOrderLine.setString(9, ol_dist_info);
         stmtInsertOrderLine.addBatch();
 

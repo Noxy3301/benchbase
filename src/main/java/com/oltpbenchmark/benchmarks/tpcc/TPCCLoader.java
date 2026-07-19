@@ -22,6 +22,7 @@ import com.oltpbenchmark.api.LoaderThread;
 import com.oltpbenchmark.benchmarks.tpcc.pojo.*;
 import com.oltpbenchmark.catalog.Table;
 import com.oltpbenchmark.util.SQLUtil;
+import java.math.BigDecimal;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -147,6 +148,11 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
     return conn.prepareStatement(sql);
   }
 
+  /** Round to the column scale: Tsurugi rejects DECIMAL binds that would lose precision. */
+  private static BigDecimal dec(double value, int scale) {
+    return BigDecimal.valueOf(value).setScale(scale, java.math.RoundingMode.HALF_UP);
+  }
+
   protected void loadItems(Connection conn, int itemCount) {
 
     try (PreparedStatement itemPrepStmt = getInsertStatement(conn, TPCCConstants.TABLENAME_ITEM)) {
@@ -178,11 +184,11 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
         item.i_im_id = TPCCUtil.randomNumber(1, 10000, benchmark.rng());
 
         int idx = 1;
-        itemPrepStmt.setLong(idx++, item.i_id);
+        itemPrepStmt.setInt(idx++, item.i_id);
         itemPrepStmt.setString(idx++, item.i_name);
-        itemPrepStmt.setDouble(idx++, item.i_price);
+        itemPrepStmt.setBigDecimal(idx++, dec(item.i_price, 2));
         itemPrepStmt.setString(idx++, item.i_data);
-        itemPrepStmt.setLong(idx, item.i_im_id);
+        itemPrepStmt.setInt(idx, item.i_im_id);
         itemPrepStmt.addBatch();
         batchSize++;
 
@@ -222,9 +228,9 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
       warehouse.w_zip = "123456789";
 
       int idx = 1;
-      whsePrepStmt.setLong(idx++, warehouse.w_id);
-      whsePrepStmt.setDouble(idx++, warehouse.w_ytd);
-      whsePrepStmt.setDouble(idx++, warehouse.w_tax);
+      whsePrepStmt.setInt(idx++, warehouse.w_id);
+      whsePrepStmt.setBigDecimal(idx++, dec(warehouse.w_ytd, 2));
+      whsePrepStmt.setBigDecimal(idx++, dec(warehouse.w_tax, 4));
       whsePrepStmt.setString(idx++, warehouse.w_name);
       whsePrepStmt.setString(idx++, warehouse.w_street_1);
       whsePrepStmt.setString(idx++, warehouse.w_street_2);
@@ -279,12 +285,12 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
               }
 
               int idx = 1;
-              stockPreparedStatement.setLong(idx++, stock.s_w_id);
-              stockPreparedStatement.setLong(idx++, stock.s_i_id);
-              stockPreparedStatement.setLong(idx++, stock.s_quantity);
-              stockPreparedStatement.setDouble(idx++, stock.s_ytd);
-              stockPreparedStatement.setLong(idx++, stock.s_order_cnt);
-              stockPreparedStatement.setLong(idx++, stock.s_remote_cnt);
+              stockPreparedStatement.setInt(idx++, stock.s_w_id);
+              stockPreparedStatement.setInt(idx++, stock.s_i_id);
+              stockPreparedStatement.setInt(idx++, stock.s_quantity);
+              stockPreparedStatement.setBigDecimal(idx++, dec(stock.s_ytd, 2));
+              stockPreparedStatement.setInt(idx++, stock.s_order_cnt);
+              stockPreparedStatement.setInt(idx++, stock.s_remote_cnt);
               stockPreparedStatement.setString(idx++, stock.s_data);
               stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
               stockPreparedStatement.setString(idx++, TPCCUtil.randomStr(24));
@@ -365,11 +371,11 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
         district.d_zip = "123456789";
 
         int idx = 1;
-        distPrepStmt.setLong(idx++, district.d_w_id);
-        distPrepStmt.setLong(idx++, district.d_id);
-        distPrepStmt.setDouble(idx++, district.d_ytd);
-        distPrepStmt.setDouble(idx++, district.d_tax);
-        distPrepStmt.setLong(idx++, district.d_next_o_id);
+        distPrepStmt.setInt(idx++, district.d_w_id);
+        distPrepStmt.setInt(idx++, district.d_id);
+        distPrepStmt.setBigDecimal(idx++, dec(district.d_ytd, 2));
+        distPrepStmt.setBigDecimal(idx++, dec(district.d_tax, 4));
+        distPrepStmt.setInt(idx++, district.d_next_o_id);
         distPrepStmt.setString(idx++, district.d_name);
         distPrepStmt.setString(idx++, district.d_street_1);
         distPrepStmt.setString(idx++, district.d_street_2);
@@ -434,18 +440,18 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
           customer.c_data = TPCCUtil.randomStr(TPCCUtil.randomNumber(300, 500, benchmark.rng()));
 
           int idx = 1;
-          custPrepStmt.setLong(idx++, customer.c_w_id);
-          custPrepStmt.setLong(idx++, customer.c_d_id);
-          custPrepStmt.setLong(idx++, customer.c_id);
-          custPrepStmt.setDouble(idx++, customer.c_discount);
+          custPrepStmt.setInt(idx++, customer.c_w_id);
+          custPrepStmt.setInt(idx++, customer.c_d_id);
+          custPrepStmt.setInt(idx++, customer.c_id);
+          custPrepStmt.setBigDecimal(idx++, dec(customer.c_discount, 4));
           custPrepStmt.setString(idx++, customer.c_credit);
           custPrepStmt.setString(idx++, customer.c_last);
           custPrepStmt.setString(idx++, customer.c_first);
-          custPrepStmt.setDouble(idx++, customer.c_credit_lim);
-          custPrepStmt.setDouble(idx++, customer.c_balance);
-          custPrepStmt.setDouble(idx++, customer.c_ytd_payment);
-          custPrepStmt.setLong(idx++, customer.c_payment_cnt);
-          custPrepStmt.setLong(idx++, customer.c_delivery_cnt);
+          custPrepStmt.setBigDecimal(idx++, dec(customer.c_credit_lim, 2));
+          custPrepStmt.setBigDecimal(idx++, dec(customer.c_balance, 2));
+          custPrepStmt.setBigDecimal(idx++, dec(customer.c_ytd_payment, 2));
+          custPrepStmt.setInt(idx++, customer.c_payment_cnt);
+          custPrepStmt.setInt(idx++, customer.c_delivery_cnt);
           custPrepStmt.setString(idx++, customer.c_street_1);
           custPrepStmt.setString(idx++, customer.c_street_2);
           custPrepStmt.setString(idx++, customer.c_city);
@@ -503,7 +509,7 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
           histPrepStmt.setInt(idx++, history.h_d_id);
           histPrepStmt.setInt(idx++, history.h_w_id);
           histPrepStmt.setTimestamp(idx++, history.h_date);
-          histPrepStmt.setDouble(idx++, history.h_amount);
+          histPrepStmt.setBigDecimal(idx++, dec(history.h_amount, 2));
           histPrepStmt.setString(idx, history.h_data);
           histPrepStmt.addBatch();
 
@@ -695,15 +701,15 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
             orderLineStatement.setInt(idx++, order_line.ol_d_id);
             orderLineStatement.setInt(idx++, order_line.ol_o_id);
             orderLineStatement.setInt(idx++, order_line.ol_number);
-            orderLineStatement.setLong(idx++, order_line.ol_i_id);
+            orderLineStatement.setInt(idx++, order_line.ol_i_id);
             if (order_line.ol_delivery_d != null) {
               orderLineStatement.setTimestamp(idx++, order_line.ol_delivery_d);
             } else {
-              orderLineStatement.setNull(idx++, 0);
+              orderLineStatement.setNull(idx++, Types.TIMESTAMP);
             }
-            orderLineStatement.setDouble(idx++, order_line.ol_amount);
-            orderLineStatement.setLong(idx++, order_line.ol_supply_w_id);
-            orderLineStatement.setDouble(idx++, order_line.ol_quantity);
+            orderLineStatement.setBigDecimal(idx++, dec(order_line.ol_amount, 2));
+            orderLineStatement.setInt(idx++, order_line.ol_supply_w_id);
+            orderLineStatement.setInt(idx++, order_line.ol_quantity);
             orderLineStatement.setString(idx, order_line.ol_dist_info);
             orderLineStatement.addBatch();
 

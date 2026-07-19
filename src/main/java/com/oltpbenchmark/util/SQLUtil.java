@@ -645,6 +645,11 @@ WHERE t.name='%s' AND c.name='%s'
 
             catalog_idx.addColumn(idx_col_name, idx_direction, idx_col_pos);
           }
+        } catch (SQLFeatureNotSupportedException ex) {
+          // Optional JDBC metadata; the benchmarks work without it.
+          LOG.debug(
+              "getIndexInfo unsupported by this driver; skipping index metadata for {}",
+              table_name);
         }
 
         tables.put(table_name, catalog_tbl);
@@ -665,6 +670,12 @@ WHERE t.name='%s' AND c.name='%s'
           Column catalog_col = table.getColumnByName(colName);
           catalog_col.setForeignKey(fk_col);
         }
+      } catch (SQLFeatureNotSupportedException ex) {
+        // Optional JDBC metadata; the benchmarks work without it.
+        LOG.debug(
+            "getImportedKeys unsupported by this driver; skipping foreign-key metadata for {}",
+            table.getName());
+        break;
       }
     }
 

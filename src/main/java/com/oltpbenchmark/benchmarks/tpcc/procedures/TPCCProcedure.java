@@ -19,7 +19,11 @@ package com.oltpbenchmark.benchmarks.tpcc.procedures;
 
 import com.oltpbenchmark.api.Procedure;
 import com.oltpbenchmark.benchmarks.tpcc.TPCCWorker;
+import com.oltpbenchmark.types.DatabaseType;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Random;
@@ -53,6 +57,20 @@ public abstract class TPCCProcedure extends Procedure {
     String escaped = plan.replace("'", "''");
     try (Statement stmt = conn.createStatement()) {
       stmt.execute("SET @_tx_plan = '" + escaped + "'");
+    }
+  }
+
+  /**
+   * Bind a monetary value into a DECIMAL(p,scale) column. Tsurugi rejects binds whose extra
+   * floating-point digits would lose precision (SQL-02011), so round to the column scale there;
+   * other databases keep the historical setDouble path.
+   */
+  protected void setDecimal(PreparedStatement stmt, int index, double value, int scale)
+      throws SQLException {
+    if (getDbType() == DatabaseType.TSURUGI) {
+      stmt.setBigDecimal(index, BigDecimal.valueOf(value).setScale(scale, RoundingMode.HALF_UP));
+    } else {
+      stmt.setDouble(index, value);
     }
   }
 }

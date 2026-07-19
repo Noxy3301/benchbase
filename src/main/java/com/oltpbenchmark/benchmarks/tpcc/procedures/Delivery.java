@@ -366,7 +366,8 @@ public class Delivery extends TPCCProcedure {
 
     try (PreparedStatement delivUpdateCustBalDelivCnt =
         this.getPreparedStatement(conn, delivUpdateCustBalDelivCntSQL)) {
-      delivUpdateCustBalDelivCnt.setBigDecimal(1, BigDecimal.valueOf(orderLineTotal));
+      delivUpdateCustBalDelivCnt.setBigDecimal(
+          1, BigDecimal.valueOf(orderLineTotal).setScale(2, java.math.RoundingMode.HALF_UP));
       delivUpdateCustBalDelivCnt.setInt(2, w_id);
       delivUpdateCustBalDelivCnt.setInt(3, d_id);
       delivUpdateCustBalDelivCnt.setInt(4, c_id);
