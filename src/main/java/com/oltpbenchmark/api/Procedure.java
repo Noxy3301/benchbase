@@ -124,11 +124,72 @@ public abstract class Procedure {
       pStmt = conn.prepareStatement(stmt.getSQL(), is);
     }
     // They don't care about keys
-    else {
+    else if (this.dbType == DatabaseType.TSURUGI) {
+      pStmt = this.getCachedPreparedStatement(conn, stmt);
+    } else {
       pStmt = conn.prepareStatement(stmt.getSQL());
     }
 
     return (pStmt);
+  }
+
+  /**
+   * Tsurugi's JDBC driver runs a server-side prepare on first execution and disposes it on close,
+   * so BenchBase's prepare-per-transaction pattern pays two extra server round trips per statement.
+   * The official Tsurugi benchmark clients prepare each SQL shape once per worker instead; this
+   * cache gives the JDBC path the same lifecycle by keeping one statement per SQL shape per
+   * connection and shielding it from the procedures' try-with-resources close.
+   */
+  private final Map<SQLStmt, PreparedStatement> tsurugiStmtCache = new HashMap<>();
+
+  private Connection tsurugiCachedConn = null;
+
+  private PreparedStatement getCachedPreparedStatement(Connection conn, SQLStmt stmt)
+      throws SQLException {
+    if (conn != this.tsurugiCachedConn) {
+      // The worker reconnected: statements prepared on the old connection are unusable.
+      for (PreparedStatement cached : this.tsurugiStmtCache.values()) {
+        try {
+          cached.unwrap(PreparedStatement.class).close();
+        } catch (SQLException ignore) {
+          // the old connection is typically already gone
+        }
+      }
+      this.tsurugiStmtCache.clear();
+      this.tsurugiCachedConn = conn;
+    }
+    PreparedStatement cached = this.tsurugiStmtCache.get(stmt);
+    if (cached == null) {
+      final PreparedStatement real = conn.prepareStatement(stmt.getSQL());
+      cached =
+          (PreparedStatement)
+              java.lang.reflect.Proxy.newProxyInstance(
+                  Procedure.class.getClassLoader(),
+                  new Class<?>[] {PreparedStatement.class},
+                  (proxy, method, args) -> {
+                    switch (method.getName()) {
+                      case "close":
+                        // Keep the underlying statement (and its server-side prepare) alive,
+                        // but reset per-transaction state: a batch left by an aborted
+                        // transaction must not leak into the next one.
+                        real.clearBatch();
+                        real.clearParameters();
+                        return null;
+                      case "isClosed":
+                        return false;
+                      case "unwrap":
+                        return real;
+                      default:
+                        try {
+                          return method.invoke(real, args);
+                        } catch (java.lang.reflect.InvocationTargetException e) {
+                          throw e.getCause();
+                        }
+                    }
+                  });
+      this.tsurugiStmtCache.put(stmt, cached);
+    }
+    return cached;
   }
 
   /**
