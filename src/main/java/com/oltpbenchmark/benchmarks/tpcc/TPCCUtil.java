@@ -66,9 +66,27 @@ public class TPCCUtil {
     }
   }
 
+  /** Explicit-generator variant: keeps loader units deterministic and contention-free. */
+  public static String randomStr(int strLen, RandomGenerator r) {
+    if (strLen > 1) {
+      return r.astring(strLen - 1, strLen - 1);
+    } else {
+      return "";
+    }
+  }
+
   public static String randomNStr(int stringLength) {
     if (stringLength > 0) {
       return ran.nstring(stringLength, stringLength);
+    } else {
+      return "";
+    }
+  }
+
+  /** Explicit-generator variant: keeps loader units deterministic and contention-free. */
+  public static String randomNStr(int stringLength, RandomGenerator r) {
+    if (stringLength > 0) {
+      return r.nstring(stringLength, stringLength);
     } else {
       return "";
     }
