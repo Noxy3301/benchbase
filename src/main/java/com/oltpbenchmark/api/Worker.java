@@ -80,6 +80,26 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
     this.currStatement = null;
     this.transactionTypes = this.configuration.getTransTypes();
 
+    // Connection setup lives in openConnection(), invoked from
+    // BenchmarkModule.makeWorkers() so all workers can connect in parallel
+    // (serial per-connection setup cost ~0.16ms-165ms each dominated sweep
+    // wall time at high terminal counts).
+
+    // Generate all the Procedures that we're going to need
+    this.procedures.putAll(this.benchmark.getProcedures());
+    for (Entry<TransactionType, Procedure> e : this.procedures.entrySet()) {
+      Procedure proc = e.getValue();
+      this.name_procedures.put(e.getKey().getName(), proc);
+      this.class_procedures.put(proc.getClass(), proc);
+    }
+  }
+
+  /**
+   * Open this worker's database connection (unless the benchmark reconnects per transaction).
+   * Called from BenchmarkModule.makeWorkers(), potentially from a connection-setup thread pool;
+   * safe publication to the worker thread is guaranteed by Thread.start() in ThreadBench.
+   */
+  final void openConnection() {
     if (!this.configuration.getNewConnectionPerTxn()) {
       try {
         this.conn = this.benchmark.makeConnection();
@@ -88,14 +108,6 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
       } catch (SQLException ex) {
         throw new RuntimeException("Failed to connect to database", ex);
       }
-    }
-
-    // Generate all the Procedures that we're going to need
-    this.procedures.putAll(this.benchmark.getProcedures());
-    for (Entry<TransactionType, Procedure> e : this.procedures.entrySet()) {
-      Procedure proc = e.getValue();
-      this.name_procedures.put(e.getKey().getName(), proc);
-      this.class_procedures.put(proc.getClass(), proc);
     }
   }
 

@@ -205,7 +205,41 @@ public abstract class BenchmarkModule {
   }
 
   public final List<Worker<? extends BenchmarkModule>> makeWorkers() throws IOException {
-    return (this.makeWorkersImpl());
+    List<Worker<? extends BenchmarkModule>> workers = this.makeWorkersImpl();
+    openWorkerConnections(workers);
+    return workers;
+  }
+
+  /**
+   * Open all worker connections through a bounded thread pool. Workers themselves are still
+   * constructed serially on the caller's thread (keeping id order and RNG capture identical to the
+   * historical behavior); only the connection handshakes run in parallel. Any connection failure
+   * aborts the benchmark loudly, exactly like the old in-constructor path.
+   */
+  private void openWorkerConnections(List<Worker<? extends BenchmarkModule>> workers) {
+    if (workers.isEmpty()) {
+      return;
+    }
+    int poolSize = Math.min(64, workers.size());
+    java.util.concurrent.ExecutorService pool =
+        java.util.concurrent.Executors.newFixedThreadPool(poolSize);
+    try {
+      List<java.util.concurrent.Future<?>> pending = new ArrayList<>(workers.size());
+      for (Worker<? extends BenchmarkModule> worker : workers) {
+        pending.add(pool.submit(worker::openConnection));
+      }
+      for (java.util.concurrent.Future<?> future : pending) {
+        future.get();
+      }
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new RuntimeException("Interrupted while opening worker connections", ex);
+    } catch (java.util.concurrent.ExecutionException ex) {
+      throw new RuntimeException(
+          "Failed to open worker connection", ex.getCause() != null ? ex.getCause() : ex);
+    } finally {
+      pool.shutdownNow();
+    }
   }
 
   public final void refreshCatalog() throws SQLException {
