@@ -41,10 +41,12 @@ public class WorkloadState {
 
   private int workersWaiting = 0;
 
-  @SuppressWarnings("unused") // never read
-  private int workersWorking = 0;
-
-  private int workerNeedSleep;
+  // volatile so the per-transaction fast paths (stayAwake, fetchWork on
+  // unlimited-rate phases) can check it without taking the monitor: with
+  // 512-1024 terminals, any per-transaction acquisition of this single
+  // monitor convoys every worker AND starves ThreadBench's main loop
+  // (addToQueue), which is what actually ends the phase on time.
+  private volatile int workerNeedSleep;
 
   private volatile Phase currentPhase = null;
 
@@ -58,6 +60,17 @@ public class WorkloadState {
 
   /** Add a request to do work. */
   public void addToQueue(int amount, boolean resetQueues) {
+    // Lock-free fast path: unlimited-rate phases never use the work queue, and
+    // this method is called from ThreadBench's main loop every tick. Without
+    // this check the main loop queues behind every worker on the monitor and
+    // cannot end the phase on schedule.
+    if (!resetQueues) {
+      Phase phase = currentPhase;
+      if (phase == null || phase.isDisabled() || !phase.isRateLimited() || phase.isSerial()) {
+        return;
+      }
+    }
+
     int workAdded = 0;
 
     synchronized (this) {
@@ -101,8 +114,13 @@ public class WorkloadState {
 
   /** Called by ThreadPoolThreads when waiting for work. */
   public SubmittedProcedure fetchWork() {
-    synchronized (this) {
-      if (currentPhase != null && currentPhase.isSerial()) {
+    // Read the volatile phase once; using the snapshot below also removes the
+    // window where a concurrent phase switch could null currentPhase between
+    // the branch check and its use.
+    Phase phase = currentPhase;
+
+    if (phase != null && phase.isSerial()) {
+      synchronized (this) {
         ++workersWaiting;
         while (getGlobalState() == State.LATENCY_COMPLETE) {
           try {
@@ -117,19 +135,22 @@ public class WorkloadState {
           return null;
         }
 
-        ++workersWorking;
+        // Re-read the phase: the wait above can span a phase switch, and the
+        // serial cursor must come from the phase that is current now.
+        Phase phaseAfterWait = currentPhase;
+        if (phaseAfterWait == null) {
+          return null;
+        }
         return new SubmittedProcedure(
-            currentPhase.chooseTransaction(getGlobalState() == State.COLD_QUERY));
+            phaseAfterWait.chooseTransaction(getGlobalState() == State.COLD_QUERY));
       }
     }
 
-    // Unlimited-rate phases don't use the work queue.
-    if (currentPhase != null && !currentPhase.isRateLimited()) {
-      synchronized (this) {
-        ++workersWorking;
-      }
-      return new SubmittedProcedure(
-          currentPhase.chooseTransaction(getGlobalState() == State.COLD_QUERY));
+    // Unlimited-rate phases don't use the work queue; nothing here needs the
+    // monitor (the old synchronized block only maintained a never-read
+    // counter and convoyed all workers at high terminal counts).
+    if (phase != null && !phase.isRateLimited()) {
+      return new SubmittedProcedure(phase.chooseTransaction(getGlobalState() == State.COLD_QUERY));
     }
 
     synchronized (this) {
@@ -151,16 +172,14 @@ public class WorkloadState {
         workersWaiting -= 1;
       }
 
-      ++workersWorking;
-
       return workQueue.remove();
     }
   }
 
   public void finishedWork() {
-    synchronized (this) {
-      --workersWorking;
-    }
+    // Kept for API symmetry with fetchWork; the workersWorking counter it
+    // maintained was never read, and taking the shared monitor here once per
+    // transaction convoyed every worker.
   }
 
   public Phase getNextPhase() {
@@ -181,6 +200,14 @@ public class WorkloadState {
    * Called by workers to ask if they should stay awake in this phase
    */
   public void stayAwake() {
+    // Lock-free fast path for the common case (phase active, nobody needs to
+    // sleep). workerNeedSleep is volatile; a worker that races a phase switch
+    // and misses the new sleep request re-checks on its next loop iteration,
+    // which is the same guarantee the fully-locked version gave between
+    // consecutive transactions.
+    if (workerNeedSleep == 0) {
+      return;
+    }
     synchronized (this) {
       while (workerNeedSleep > 0) {
         workerNeedSleep--;
