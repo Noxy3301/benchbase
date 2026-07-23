@@ -114,65 +114,81 @@ public class WorkloadState {
 
   /** Called by ThreadPoolThreads when waiting for work. */
   public SubmittedProcedure fetchWork() {
-    // Read the volatile phase once; using the snapshot below also removes the
-    // window where a concurrent phase switch could null currentPhase between
-    // the branch check and its use.
-    Phase phase = currentPhase;
+    while (true) {
+      // Snapshot the volatile phase and classify against it; if the phase
+      // switches while we dispatch, retry against the new phase so a worker
+      // can never execute under a stale phase's dispatch rules (e.g. bypass
+      // the work queue of a rate-limited phase that replaced a serial one).
+      Phase phase = currentPhase;
 
-    if (phase != null && phase.isSerial()) {
-      synchronized (this) {
-        ++workersWaiting;
-        while (getGlobalState() == State.LATENCY_COMPLETE) {
-          try {
-            this.wait();
-          } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+      if (phase != null && phase.isSerial()) {
+        synchronized (this) {
+          if (currentPhase != phase) {
+            continue;
           }
-        }
-        --workersWaiting;
+          ++workersWaiting;
+          while (getGlobalState() == State.LATENCY_COMPLETE) {
+            try {
+              // Timed: a phase switch or DONE transition can race the final
+              // notification; waiters must observe it in bounded time.
+              this.wait(50);
+            } catch (InterruptedException e) {
+              throw new RuntimeException(e);
+            }
+          }
+          --workersWaiting;
 
-        if (getGlobalState() == State.EXIT || getGlobalState() == State.DONE) {
-          return null;
-        }
-
-        // Re-read the phase: the wait above can span a phase switch, and the
-        // serial cursor must come from the phase that is current now.
-        Phase phaseAfterWait = currentPhase;
-        if (phaseAfterWait == null) {
-          return null;
-        }
-        return new SubmittedProcedure(
-            phaseAfterWait.chooseTransaction(getGlobalState() == State.COLD_QUERY));
-      }
-    }
-
-    // Unlimited-rate phases don't use the work queue; nothing here needs the
-    // monitor (the old synchronized block only maintained a never-read
-    // counter and convoyed all workers at high terminal counts).
-    if (phase != null && !phase.isRateLimited()) {
-      return new SubmittedProcedure(phase.chooseTransaction(getGlobalState() == State.COLD_QUERY));
-    }
-
-    synchronized (this) {
-      // Sleep until work is available.
-      if (workQueue.peek() == null) {
-        workersWaiting += 1;
-        while (workQueue.peek() == null) {
-          if (this.benchmarkState.getState() == State.EXIT
-              || this.benchmarkState.getState() == State.DONE) {
+          if (getGlobalState() == State.EXIT || getGlobalState() == State.DONE) {
             return null;
           }
 
-          try {
-            this.wait();
-          } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+          if (currentPhase != phase) {
+            // The wait spanned a phase switch: redispatch under the new phase.
+            continue;
           }
+          return new SubmittedProcedure(
+              phase.chooseTransaction(getGlobalState() == State.COLD_QUERY));
         }
-        workersWaiting -= 1;
       }
 
-      return workQueue.remove();
+      // Unlimited-rate phases don't use the work queue; nothing here needs the
+      // monitor (the old synchronized block only maintained a never-read
+      // counter and convoyed all workers at high terminal counts).
+      if (phase != null && !phase.isRateLimited()) {
+        SubmittedProcedure work =
+            new SubmittedProcedure(phase.chooseTransaction(getGlobalState() == State.COLD_QUERY));
+        if (currentPhase != phase) {
+          // Phase switched underneath us: discard and redispatch so we do not
+          // slip an unqueued transaction into a rate-limited successor phase.
+          continue;
+        }
+        return work;
+      }
+
+      synchronized (this) {
+        // Sleep until work is available.
+        if (workQueue.peek() == null) {
+          workersWaiting += 1;
+          while (workQueue.peek() == null) {
+            if (this.benchmarkState.getState() == State.EXIT
+                || this.benchmarkState.getState() == State.DONE) {
+              return null;
+            }
+
+            try {
+              // Timed: DONE is written after the final notifyAll in the
+              // ThreadBench shutdown sequence, so a worker that wakes early
+              // and re-waits would otherwise never be notified again.
+              this.wait(50);
+            } catch (InterruptedException e) {
+              throw new RuntimeException(e);
+            }
+          }
+          workersWaiting -= 1;
+        }
+
+        return workQueue.remove();
+      }
     }
   }
 

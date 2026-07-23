@@ -38,6 +38,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,16 +100,28 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
    * Called from BenchmarkModule.makeWorkers(), potentially from a connection-setup thread pool;
    * safe publication to the worker thread is guaranteed by Thread.start() in ThreadBench.
    */
-  final void openConnection() {
-    if (!this.configuration.getNewConnectionPerTxn()) {
-      try {
-        this.conn = this.benchmark.makeConnection();
-        this.conn.setAutoCommit(false);
-        this.conn.setTransactionIsolation(this.configuration.getIsolationMode());
-      } catch (SQLException ex) {
-        closeConnectionQuietly();
-        throw new RuntimeException("Failed to connect to database", ex);
+  final void openConnection(Object publishLock, AtomicBoolean aborted) {
+    if (this.configuration.getNewConnectionPerTxn()) {
+      return;
+    }
+    Connection c;
+    try {
+      c = this.benchmark.makeConnection();
+      c.setAutoCommit(false);
+      c.setTransactionIsolation(this.configuration.getIsolationMode());
+    } catch (SQLException ex) {
+      throw new RuntimeException("Failed to connect to database", ex);
+    }
+    // The connection stays local until fully configured; publication is
+    // serialized against the abort flag so the aborting thread can safely
+    // close published connections without racing still-running setup tasks
+    // (a task that loses the race closes its own connection here).
+    synchronized (publishLock) {
+      if (aborted.get()) {
+        closeQuietly(c);
+        return;
       }
+      this.conn = c;
     }
   }
 
@@ -116,6 +129,10 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
   final void closeConnectionQuietly() {
     Connection c = this.conn;
     this.conn = null;
+    closeQuietly(c);
+  }
+
+  private static void closeQuietly(Connection c) {
     if (c != null) {
       try {
         c.close();

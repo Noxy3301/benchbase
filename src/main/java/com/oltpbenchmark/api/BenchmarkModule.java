@@ -231,32 +231,56 @@ public abstract class BenchmarkModule {
               t.setDaemon(true);
               return t;
             });
-    List<java.util.concurrent.Future<?>> pending = new ArrayList<>(workers.size());
+    // Publication of each connection into its Worker is serialized against
+    // this abort flag (see Worker.openConnection): once aborted is set under
+    // the lock, no task can publish, so the closer below cannot race a
+    // still-running setup task; stragglers close their own connection.
+    final Object publishLock = new Object();
+    final java.util.concurrent.atomic.AtomicBoolean aborted =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    // Completion order (not submission order): one failed attempt must abort
+    // the run even while another attempt hangs in a non-interruptible connect.
+    // If every attempt hangs, we block like the old serial code did.
+    java.util.concurrent.CompletionService<Void> completion =
+        new java.util.concurrent.ExecutorCompletionService<>(pool);
+    List<java.util.concurrent.Future<Void>> pending = new ArrayList<>(workers.size());
     try {
       for (Worker<? extends BenchmarkModule> worker : workers) {
-        pending.add(pool.submit(worker::openConnection));
+        pending.add(
+            completion.submit(
+                () -> {
+                  worker.openConnection(publishLock, aborted);
+                  return null;
+                }));
       }
-      for (java.util.concurrent.Future<?> future : pending) {
-        future.get();
+      for (int i = 0; i < pending.size(); i++) {
+        completion.take().get();
       }
       pool.shutdown();
     } catch (Exception ex) {
-      // Abort: stop outstanding attempts, wait for the pool to drain, then
-      // close every connection that was opened (including partially set-up
-      // ones) so no DB sessions leak past the failure.
-      for (java.util.concurrent.Future<?> future : pending) {
+      synchronized (publishLock) {
+        aborted.set(true);
+      }
+      for (java.util.concurrent.Future<Void> future : pending) {
         future.cancel(true);
       }
       pool.shutdownNow();
+      // Close the published connections on a daemon thread so a hung
+      // Connection.close() cannot pin the aborting (non-daemon) caller.
+      Thread closer =
+          new Thread(
+              () -> {
+                for (Worker<? extends BenchmarkModule> worker : workers) {
+                  worker.closeConnectionQuietly();
+                }
+              },
+              "worker-connection-abort-closer");
+      closer.setDaemon(true);
+      closer.start();
       try {
-        if (!pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
-          LOG.warn("Connection-setup pool did not drain within 30s; daemon threads left behind");
-        }
+        closer.join(30_000);
       } catch (InterruptedException ie) {
         Thread.currentThread().interrupt();
-      }
-      for (Worker<? extends BenchmarkModule> worker : workers) {
-        worker.closeConnectionQuietly();
       }
       if (ex instanceof InterruptedException) {
         Thread.currentThread().interrupt();
