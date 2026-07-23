@@ -221,24 +221,51 @@ public abstract class BenchmarkModule {
       return;
     }
     int poolSize = Math.min(64, workers.size());
+    // Daemon threads: JDBC connection attempts are not guaranteed to be
+    // interruptible, so a hung attempt must never block JVM exit after abort.
     java.util.concurrent.ExecutorService pool =
-        java.util.concurrent.Executors.newFixedThreadPool(poolSize);
+        java.util.concurrent.Executors.newFixedThreadPool(
+            poolSize,
+            r -> {
+              Thread t = new Thread(r, "worker-connection-setup");
+              t.setDaemon(true);
+              return t;
+            });
+    List<java.util.concurrent.Future<?>> pending = new ArrayList<>(workers.size());
     try {
-      List<java.util.concurrent.Future<?>> pending = new ArrayList<>(workers.size());
       for (Worker<? extends BenchmarkModule> worker : workers) {
         pending.add(pool.submit(worker::openConnection));
       }
       for (java.util.concurrent.Future<?> future : pending) {
         future.get();
       }
-    } catch (InterruptedException ex) {
-      Thread.currentThread().interrupt();
-      throw new RuntimeException("Interrupted while opening worker connections", ex);
-    } catch (java.util.concurrent.ExecutionException ex) {
-      throw new RuntimeException(
-          "Failed to open worker connection", ex.getCause() != null ? ex.getCause() : ex);
-    } finally {
+      pool.shutdown();
+    } catch (Exception ex) {
+      // Abort: stop outstanding attempts, wait for the pool to drain, then
+      // close every connection that was opened (including partially set-up
+      // ones) so no DB sessions leak past the failure.
+      for (java.util.concurrent.Future<?> future : pending) {
+        future.cancel(true);
+      }
       pool.shutdownNow();
+      try {
+        if (!pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
+          LOG.warn("Connection-setup pool did not drain within 30s; daemon threads left behind");
+        }
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+      }
+      for (Worker<? extends BenchmarkModule> worker : workers) {
+        worker.closeConnectionQuietly();
+      }
+      if (ex instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      Throwable cause =
+          (ex instanceof java.util.concurrent.ExecutionException && ex.getCause() != null)
+              ? ex.getCause()
+              : ex;
+      throw new RuntimeException("Failed to open worker connections", cause);
     }
   }
 

@@ -106,7 +106,21 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
         this.conn.setAutoCommit(false);
         this.conn.setTransactionIsolation(this.configuration.getIsolationMode());
       } catch (SQLException ex) {
+        closeConnectionQuietly();
         throw new RuntimeException("Failed to connect to database", ex);
+      }
+    }
+  }
+
+  /** Best-effort close during connection-setup abort; never throws. */
+  final void closeConnectionQuietly() {
+    Connection c = this.conn;
+    this.conn = null;
+    if (c != null) {
+      try {
+        c.close();
+      } catch (Exception ignored) {
+        // aborting anyway
       }
     }
   }
