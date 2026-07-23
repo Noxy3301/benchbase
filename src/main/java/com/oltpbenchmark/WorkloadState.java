@@ -46,7 +46,7 @@ public class WorkloadState {
 
   private int workerNeedSleep;
 
-  private Phase currentPhase = null;
+  private volatile Phase currentPhase = null;
 
   public WorkloadState(BenchmarkState benchmarkState, List<Phase> works, int num_terminals) {
     this.benchmarkState = benchmarkState;
@@ -171,9 +171,10 @@ public class WorkloadState {
   }
 
   public Phase getCurrentPhase() {
-    synchronized (benchmarkState) {
-      return currentPhase;
-    }
+    // currentPhase is volatile and written under the WorkloadState monitor in
+    // switchToNextPhase(); the old synchronized(benchmarkState) here locked an
+    // unrelated object (not the writer's lock) and convoyed all workers.
+    return currentPhase;
   }
 
   /*

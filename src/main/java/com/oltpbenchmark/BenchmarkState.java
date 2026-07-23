@@ -49,9 +49,10 @@ public final class BenchmarkState {
   }
 
   public State getState() {
-    synchronized (this) {
-      return state;
-    }
+    // state is volatile; taking the monitor here serialized every worker on a
+    // single lock (~10 acquisitions per transaction) and convoyed at high
+    // terminal counts. Plain volatile read is sufficient.
+    return state;
   }
 
   /** Wait for all threads to call this. Returns once all the threads have entered. */
