@@ -23,6 +23,7 @@ import com.oltpbenchmark.api.Loader;
 import com.oltpbenchmark.api.Worker;
 import com.oltpbenchmark.benchmarks.ycsb.procedures.InsertRecord;
 import com.oltpbenchmark.catalog.Table;
+import com.oltpbenchmark.distributions.ZipfianGenerator;
 import com.oltpbenchmark.util.SQLUtil;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -82,9 +83,15 @@ public final class YCSBBenchmark extends BenchmarkModule {
         while (res.next()) {
           init_record_count = res.getInt(1);
         }
+        int zipfianItemCount = init_record_count + 1;
+
+        // Zeta is deterministic in (itemCount, theta); every worker would compute the
+        // same value, so compute it once instead of paying the O(n) zetastatic loop
+        // per worker.
+        double zetan = ZipfianGenerator.zetastatic(zipfianItemCount, this.skewFactor);
 
         for (int i = 0; i < workConf.getTerminals(); ++i) {
-          workers.add(new YCSBWorker(this, i, init_record_count + 1));
+          workers.add(new YCSBWorker(this, i, zipfianItemCount, zetan));
         }
       }
     } catch (SQLException e) {
