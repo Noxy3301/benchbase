@@ -30,6 +30,13 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -205,7 +212,85 @@ public abstract class BenchmarkModule {
   }
 
   public final List<Worker<? extends BenchmarkModule>> makeWorkers() throws IOException {
-    return (this.makeWorkersImpl());
+    List<Worker<? extends BenchmarkModule>> workers = this.makeWorkersImpl();
+    openWorkerConnections(workers);
+    return workers;
+  }
+
+  /**
+   * Open all worker connections through a bounded thread pool. Workers are still constructed
+   * serially on the caller's thread, keeping id order and RNG capture unchanged; only the
+   * handshakes overlap. Any connection failure aborts the benchmark loudly.
+   */
+  private void openWorkerConnections(List<Worker<? extends BenchmarkModule>> workers) {
+    if (workers.isEmpty()) {
+      return;
+    }
+    int poolSize = Math.min(64, workers.size());
+    // Daemon threads: a JDBC connect is not guaranteed to be interruptible, and
+    // a hung attempt must never block JVM exit after an abort.
+    ExecutorService pool =
+        Executors.newFixedThreadPool(
+            poolSize,
+            r -> {
+              Thread t = new Thread(r, "worker-connection-setup");
+              t.setDaemon(true);
+              return t;
+            });
+    // Once aborted is set under this lock no task can publish, so the closer
+    // below cannot race a still-running setup task (see Worker.openConnection).
+    final Object publishLock = new Object();
+    final AtomicBoolean aborted = new AtomicBoolean(false);
+    // Completion order, not submission order: one failed attempt must abort the
+    // run even while another hangs in a non-interruptible connect. If every
+    // attempt hangs, this blocks like the old serial code did.
+    CompletionService<Void> completion = new ExecutorCompletionService<>(pool);
+    List<Future<Void>> pending = new ArrayList<>(workers.size());
+    try {
+      for (Worker<? extends BenchmarkModule> worker : workers) {
+        pending.add(
+            completion.submit(
+                () -> {
+                  worker.openConnection(publishLock, aborted);
+                  return null;
+                }));
+      }
+      for (int i = 0; i < pending.size(); i++) {
+        completion.take().get();
+      }
+      pool.shutdown();
+    } catch (Exception ex) {
+      synchronized (publishLock) {
+        aborted.set(true);
+      }
+      for (Future<Void> future : pending) {
+        future.cancel(true);
+      }
+      pool.shutdownNow();
+      // Close on a daemon thread: a hung Connection.close() must not pin the
+      // aborting caller.
+      Thread closer =
+          new Thread(
+              () -> {
+                for (Worker<? extends BenchmarkModule> worker : workers) {
+                  worker.closeConnectionQuietly();
+                }
+              },
+              "worker-connection-abort-closer");
+      closer.setDaemon(true);
+      closer.start();
+      try {
+        closer.join(30_000);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+      }
+      if (ex instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      Throwable cause =
+          (ex instanceof ExecutionException && ex.getCause() != null) ? ex.getCause() : ex;
+      throw new RuntimeException("Failed to open worker connections", cause);
+    }
   }
 
   public final void refreshCatalog() throws SQLException {

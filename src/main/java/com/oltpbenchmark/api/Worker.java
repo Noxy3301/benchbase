@@ -39,6 +39,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,15 +82,8 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
     this.currStatement = null;
     this.transactionTypes = this.configuration.getTransTypes();
 
-    if (!this.configuration.getNewConnectionPerTxn()) {
-      try {
-        this.conn = this.benchmark.makeConnection();
-        this.conn.setAutoCommit(false);
-        this.conn.setTransactionIsolation(this.configuration.getIsolationMode());
-      } catch (SQLException ex) {
-        throw new RuntimeException("Failed to connect to database", ex);
-      }
-    }
+    // Connection setup lives in openConnection(), which BenchmarkModule drives
+    // for every worker at once
 
     // Generate all the Procedures that we're going to need
     this.procedures.putAll(this.benchmark.getProcedures());
@@ -97,6 +91,65 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
       Procedure proc = e.getValue();
       this.name_procedures.put(e.getKey().getName(), proc);
       this.class_procedures.put(proc.getClass(), proc);
+    }
+  }
+
+  /**
+   * Open this worker's database connection, unless the benchmark reconnects per transaction. Called
+   * from BenchmarkModule.makeWorkers(), possibly on a setup thread; publication to the worker
+   * thread is guaranteed by Thread.start() in ThreadBench.
+   */
+  final void openConnection(Object publishLock, AtomicBoolean aborted) {
+    if (this.configuration.getNewConnectionPerTxn()) {
+      return;
+    }
+    Connection c;
+    try {
+      c = this.benchmark.makeConnection();
+    } catch (SQLException ex) {
+      throw new RuntimeException("Failed to connect to database", ex);
+    }
+    try {
+      c.setAutoCommit(false);
+      c.setTransactionIsolation(this.configuration.getIsolationMode());
+    } catch (SQLException ex) {
+      // Hand it to the same owner the success path uses. Closing here would let
+      // a hung close withhold the failure the caller is waiting for.
+      publishOrClose(c, publishLock, aborted);
+      throw new RuntimeException("Failed to connect to database", ex);
+    }
+    publishOrClose(c, publishLock, aborted);
+  }
+
+  /**
+   * Take ownership of a connection: publish it to this worker, or close it when setup has already
+   * aborted. Publication is serialized against the abort flag, so a task that loses the race closes
+   * its own connection instead of leaving it unreachable.
+   */
+  private void publishOrClose(Connection c, Object publishLock, AtomicBoolean aborted) {
+    synchronized (publishLock) {
+      if (aborted.get()) {
+        closeQuietly(c);
+        return;
+      }
+      this.conn = c;
+    }
+  }
+
+  /** Best-effort close during connection-setup abort; never throws. */
+  final void closeConnectionQuietly() {
+    Connection c = this.conn;
+    this.conn = null;
+    closeQuietly(c);
+  }
+
+  private static void closeQuietly(Connection c) {
+    if (c != null) {
+      try {
+        c.close();
+      } catch (Exception ignored) {
+        // aborting anyway
+      }
     }
   }
 
