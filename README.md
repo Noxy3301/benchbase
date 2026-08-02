@@ -6,8 +6,21 @@
 > **`research/helios` branch** — patched for [Noxy3301/helios](https://github.com/Noxy3301/helios).
 >
 > Changes from upstream `main`:
-> - **OCC commit-conflict retry** (`api/Worker.java`, `tpcc/TPCCLoader.java`) — `Worker.isRetryable()` recognizes MySQL error 1180 with `"Got error 149"` (`HA_ERR_LOCK_DEADLOCK`) as transient, and `TPCCLoader.loadStock()` adds batch-level retry so parallel STOCK bulk-load survives the same deadlocks.
-> - **TPC-C prefetch plan injection** (`tpcc/procedures/*.java`) — when the `HELIOS_PREFETCH_PLAN` environment variable is set, each procedure builds a Helios DSL plan via `SET @_tx_plan` and the SQLStmts append `FORCE INDEX (...)` hints to keep MySQL's access path aligned with the DSL plan; with the flag unset, SQL falls back to the upstream form.
+> - **OCC commit-conflict retry** (`api/Worker.java`, `tpcc/TPCCLoader.java`) — `Worker.isRetryable()` recognizes MySQL error 1180 / `HY000` carrying `"Got error 149"` (`HA_ERR_LOCK_DEADLOCK`) and `SQLTransactionRollbackException` with SQLState `40001` as transient, and the TPC-C loader re-sends a conflicting batch through its `BatchWriter` under full-jitter backoff, halving a batch that keeps losing validation.
+> - **TPC-C prefetch plan injection** (`tpcc/procedures/*.java`) — when `HELIOS_PREFETCH_PLAN=1` (or `-Dhelios.prefetchPlan=true`), each procedure builds a Helios DSL plan via `SET @_tx_plan` and the index-sensitive SQLStmts append `FORCE INDEX (...)` hints to keep MySQL's access path aligned with the DSL plan; otherwise SQL falls back to the upstream form.
+> - **Parallel TPC-C data load** (`tpcc/TPCCLoader.java`, `tpcc/TPCCUtil.java`) — ITEM splits by id range and each warehouse into stock, customer+history and new_order+order_line units, latched parent-before-child along the DDL foreign keys and queued children-after-parents so a FIFO pool of any size stays deadlock-free. OORDER stays at one writer per warehouse. The shard budget is `availableProcessors()` clamped to `1..1024` (`-Dtpcc.load.shards=N` to override) and is spread across warehouses, and each unit derives its generator from `(randomSeed, table, warehouse, chunk)`, so RNG-derived values do not depend on pool scheduling.
+> - **Parallel TPC-H data load** (`tpch/TPCHLoader.java`) — `createLoaderThreads()` shards PART, CUSTOMER, ORDERS, PARTSUPP and LINEITEM into `N = availableProcessors()` loader threads (`-Dtpch.load.shards=N` to override) over the generators' deterministic `(part, partCount)` chunks, so N shards produce the same dataset as one below scale factor 30000 (see the warning below); REGION, NATION and SUPPLIER stay single-sharded. A `CountDownLatch` DAG sized to each parent's shard count keeps FK parent-before-child order on a successful load, and `genTable()` rethrows a failed batch so the process aborts rather than reporting a load that ran against a partial parent.
+> - **Parallel worker connection setup** (`api/BenchmarkModule.java`, `api/Worker.java`) — connection setup moves out of the `Worker` constructor into `openConnection()`, which `makeWorkers()` drives through a bounded pool. Workers are still constructed serially, so worker ids, construction order and RNG capture are unchanged; only the handshakes overlap.
+> - **Shared Zipfian zeta constant** (`ycsb/*.java`, `distributions/ZipfianGenerator.java`) — zeta depends only on (item count, theta), so `makeWorkersImpl()` computes it once and passes it to every worker through the precomputed-zetan constructor. Generator fields and drawn sequences are unchanged for a given seed.
+> - **Tsurugi support** (`benchmarks/*`, `resources/benchmarks/*`, `config/tsurugi/`) — a `tsurugi` Maven profile, DDL for TPC-C, TATP, YCSB and TPC-H plus a TPC-C dialect file, prepared statements cached per `SQLStmt` and invalidated when the connection changes, and DECIMAL binds rounded to the declared column scale, which strict-typing drivers require. TPC-C, YCSB and TATP run; TPC-H covers schema and load only. See `config/tsurugi/README.md`.
+
+> [!WARNING]
+> At TPC-H scale factor 30000 and above, a sharded load produces a **different dataset**
+> than a single-shard load. ORDERS and LINEITEM switch their key generators to
+> `RowRandomLong`, whose sequential draws use a 64-bit LCG while `advanceRows()` skips
+> ahead with 32-bit constants, so every shard after the first resumes a stream the
+> single-shard generator never visits. Load with `-Dtpch.load.shards=1` at those scale
+> factors. This predates the parallel load and also affects upstream `RowRandomLong`.
 
 BenchBase (formerly [OLTPBench](https://github.com/oltpbenchmark/oltpbench/)) is a Multi-DBMS SQL Benchmarking Framework via JDBC.
 
