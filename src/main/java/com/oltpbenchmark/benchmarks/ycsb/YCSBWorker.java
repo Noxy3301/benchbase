@@ -53,12 +53,18 @@ class YCSBWorker extends Worker<YCSBBenchmark> {
   private final InsertRecord procInsertRecord;
   private final DeleteRecord procDeleteRecord;
 
-  public YCSBWorker(YCSBBenchmark benchmarkModule, int id, int init_record_count) {
+  public YCSBWorker(YCSBBenchmark benchmarkModule, int id, int init_record_count, double zetan) {
     super(benchmarkModule, id);
     this.data = new char[benchmarkModule.fieldSize];
+    // Same arguments the (rng, items, theta) form resolves to, with zetan taken
+    // from YCSBBenchmark.makeWorkersImpl() instead of recomputed here
     this.readRecord =
         new ZipfianGenerator(
-            rng(), init_record_count, benchmarkModule.skewFactor); // pool for read keys
+            rng(),
+            0,
+            init_record_count - 1,
+            benchmarkModule.skewFactor,
+            zetan); // pool for read keys
     this.randScan = new UniformGenerator(1, YCSBConstants.MAX_SCAN);
 
     synchronized (YCSBWorker.class) {

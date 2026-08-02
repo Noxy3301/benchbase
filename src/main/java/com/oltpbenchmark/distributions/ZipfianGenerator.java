@@ -177,7 +177,7 @@ public final class ZipfianGenerator extends IntegerGenerator {
    * @param n The number of items to compute zeta over.
    * @param theta The zipfian constant.
    */
-  static double zetastatic(long n, double theta) {
+  public static double zetastatic(long n, double theta) {
     return zetastatic(0, n, theta, 0);
   }
 
