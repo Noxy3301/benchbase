@@ -82,17 +82,30 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
       oorderLatch[w] = new CountDownLatch(1);
     }
 
-    // Children are queued after their parents. A FIFO pool picks in queue order,
-    // so a unit blocked on a latch always has its parents already in pool slots;
-    // the load cannot deadlock at any pool size.
+    // Units are collected per table and enqueued table-major: every unit of a
+    // parent table precedes every unit of its children. A FIFO loader pool
+    // picks tasks in queue order, so whenever a unit blocks on a latch its
+    // parents already occupy other pool slots (running or done); the load
+    // cannot deadlock for any pool size >= 1. Table-major ordering also keeps
+    // the pool busy: a warehouse-major queue fills the pool with children of
+    // one warehouse that can only wait for the single parent unit ahead of
+    // them. Row content derives from generators seeded by (table, warehouse,
+    // chunk) or by the row key, so the enqueue order does not change it;
+    // timestamp columns take the load-time wall clock.
     List<LoaderThread> threads = new ArrayList<>();
+    List<LoaderThread> itemUnits = new ArrayList<>();
+    List<LoaderThread> whUnits = new ArrayList<>();
+    List<LoaderThread> stockUnits = new ArrayList<>();
+    List<LoaderThread> custUnits = new ArrayList<>();
+    List<LoaderThread> oorderUnits = new ArrayList<>();
+    List<LoaderThread> orderLineUnits = new ArrayList<>();
 
     // ITEM shards (no parent).
     for (int s = 0; s < itemShards; s++) {
       final int itemStart = chunkStart(TPCCConfig.configItemCount, itemShards, s);
       final int itemEnd = chunkEnd(TPCCConfig.configItemCount, itemShards, s);
       final int chunk = s;
-      threads.add(
+      itemUnits.add(
           new LoaderThread(this.benchmark) {
             @Override
             public void load(Connection conn) throws SQLException {
@@ -109,7 +122,7 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
     // WAREHOUSE + DISTRICT per warehouse (no parent).
     for (int w = 1; w <= numWh; w++) {
       final int w_id = w;
-      threads.add(
+      whUnits.add(
           new LoaderThread(this.benchmark) {
             @Override
             public void load(Connection conn) throws SQLException {
@@ -133,7 +146,7 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
         final int itemStart = chunkStart(TPCCConfig.configItemCount, stockShards, s);
         final int itemEnd = chunkEnd(TPCCConfig.configItemCount, stockShards, s);
         final int chunk = s;
-        threads.add(
+        stockUnits.add(
             new LoaderThread(this.benchmark) {
               @Override
               public void load(Connection conn) throws SQLException {
@@ -158,7 +171,7 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
         final int dStart = chunkStart(TPCCConfig.configDistPerWhse, custShards, s);
         final int dEnd = chunkEnd(TPCCConfig.configDistPerWhse, custShards, s);
         final int chunk = s;
-        threads.add(
+        custUnits.add(
             new LoaderThread(this.benchmark) {
               @Override
               public void load(Connection conn) throws SQLException {
@@ -182,7 +195,7 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
       // OORDER for the whole warehouse: after CUSTOMER (o_c_id). One writer by
       // design: where the DDL gives it a unique secondary index, the in-write
       // check makes concurrent same-warehouse inserts abort each other.
-      threads.add(
+      oorderUnits.add(
           new LoaderThread(this.benchmark) {
             @Override
             public void load(Connection conn) throws SQLException {
@@ -207,7 +220,7 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
         final int dStart = chunkStart(TPCCConfig.configDistPerWhse, orderShards, s);
         final int dEnd = chunkEnd(TPCCConfig.configDistPerWhse, orderShards, s);
         final int chunk = s;
-        threads.add(
+        orderLineUnits.add(
             new LoaderThread(this.benchmark) {
               @Override
               public void load(Connection conn) throws SQLException {
@@ -223,6 +236,15 @@ public final class TPCCLoader extends Loader<TPCCBenchmark> {
             });
       }
     }
+
+    // Parent tables first, so no child can be dequeued before every unit it
+    // waits on is already in the pool or finished.
+    threads.addAll(itemUnits);
+    threads.addAll(whUnits);
+    threads.addAll(stockUnits);
+    threads.addAll(custUnits);
+    threads.addAll(oorderUnits);
+    threads.addAll(orderLineUnits);
 
     if (workConf.getLoaderThreads() < Math.min(shards, threads.size())) {
       LOG.warn(
