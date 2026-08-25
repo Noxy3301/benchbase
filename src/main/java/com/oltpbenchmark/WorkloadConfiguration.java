@@ -37,6 +37,7 @@ public class WorkloadConfiguration {
   private int batchSize;
   private String sessionSetupFile;
   private int maxRetries;
+  private boolean autoCommit;
   private int randomSeed = -1;
   private double scaleFactor = 1.0;
   private double selectivity = -1.0;
@@ -137,6 +138,19 @@ public class WorkloadConfiguration {
 
   public void setMaxRetries(int maxRetries) {
     this.maxRetries = maxRetries;
+  }
+
+  /**
+   * Run each request on an autocommit connection instead of wrapping it in a transaction. A
+   * multi-statement procedure is then no longer atomic; only set this for workloads whose requests
+   * stand alone.
+   */
+  public boolean getAutoCommit() {
+    return autoCommit;
+  }
+
+  public void setAutoCommit(boolean autoCommit) {
+    this.autoCommit = autoCommit;
   }
 
   public void setAdvancedMonitoringEnabled(boolean advancedMonitoringEnabled) {

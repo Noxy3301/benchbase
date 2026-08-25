@@ -140,6 +140,7 @@ public class DBWorkload {
       wrkld.setBatchSize(xmlConfig.getInt("batchsize", 128));
       wrkld.setSessionSetupFile(xmlConfig.getString("sessionsetupfile"));
       wrkld.setMaxRetries(xmlConfig.getInt("retries", 3));
+      wrkld.setAutoCommit(xmlConfig.getBoolean("autocommit", false));
       wrkld.setNewConnectionPerTxn(xmlConfig.getBoolean("newConnectionPerTxn", false));
       wrkld.setReconnectOnConnectionFailure(
           xmlConfig.getBoolean("reconnectOnConnectionFailure", false));
