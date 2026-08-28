@@ -41,13 +41,13 @@ public abstract class TPCCProcedure extends Procedure {
       throws SQLException;
 
   /**
-   * Set @_tx_plan = '<plan>' on the connection via a plain Statement so the value reliably
-   * propagates to the next DML on the same connection.
+   * Set the helios_tx_plan session variable on the connection via a plain Statement. The engine
+   * consumes the value when the next transaction starts, so it has to be set per transaction.
    *
-   * <p>Using PreparedStatement with parameter binding for SET @_tx_plan = ? has been observed to
-   * occasionally not propagate the user variable to the next statement's THD when combined with the
-   * rewriteBatchedStatements=true JDBC option configured in bench/config/tpcc.xml. Bypassing the
-   * prepared-stmt path with a literal statement avoids that issue.
+   * <p>Using PreparedStatement with parameter binding for SET SESSION helios_tx_plan = ? has been
+   * observed to occasionally not propagate the value to the next statement's THD when combined
+   * with the rewriteBatchedStatements=true JDBC option configured in bench/config/tpcc.xml.
+   * Bypassing the prepared-stmt path with a literal statement avoids that issue.
    *
    * <p>Single quotes in the plan text are escaped by doubling them ('' is the SQL-standard escape
    * and works regardless of the NO_BACKSLASH_ESCAPES sql_mode). The plan grammar produced by the
@@ -56,7 +56,7 @@ public abstract class TPCCProcedure extends Procedure {
   protected static void setPrefetchPlanSession(Connection conn, String plan) throws SQLException {
     String escaped = plan.replace("'", "''");
     try (Statement stmt = conn.createStatement()) {
-      stmt.execute("SET @_tx_plan = '" + escaped + "'");
+      stmt.execute("SET SESSION helios_tx_plan = '" + escaped + "'");
     }
   }
 
