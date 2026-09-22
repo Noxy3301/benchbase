@@ -51,6 +51,8 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
 
   private WorkloadState workloadState;
   private LatencyRecord latencies;
+  // Outcome of the last doWork call, recorded with its latency.
+  private TransactionStatus lastStatus = TransactionStatus.UNKNOWN;
   private final Statement currStatement;
 
   // Interval requests used by the monitor
@@ -373,7 +375,8 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
               break;
             }
             if (preState == MEASURE && postPhase.getId() == prePhase.getId()) {
-              latencies.addLatency(transactionType.getId(), start, end, this.id, prePhase.getId());
+              latencies.addLatency(
+                  transactionType.getId(), start, end, this.id, prePhase.getId(), lastStatus);
               intervalRequests.incrementAndGet();
             }
             if (prePhase.isLatencyRun()) {
@@ -456,6 +459,7 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
    */
   protected final void doWork(DatabaseType databaseType, TransactionType transactionType) {
 
+    lastStatus = TransactionStatus.UNKNOWN;
     try {
       int retryCount = 0;
       int maxRetryCount = configuration.getMaxRetries();
@@ -689,6 +693,7 @@ public abstract class Worker<T extends BenchmarkModule> implements Runnable {
             LOG.warn("Connection error detected.");
           }
 
+          lastStatus = status;
           switch (status) {
             case UNKNOWN -> this.txnUnknown.put(transactionType);
             case SUCCESS -> this.txnSuccess.put(transactionType);

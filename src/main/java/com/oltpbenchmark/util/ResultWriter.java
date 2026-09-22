@@ -203,7 +203,8 @@ public class ResultWriter {
       "Start Time (microseconds)",
       "Latency (microseconds)",
       "Worker Id (start number)",
-      "Phase Id (index in config file)"
+      "Phase Id (index in config file)",
+      "Status"
     };
     out.println(StringUtil.join(",", header));
     for (LatencyRecord.Sample s : results.getLatencySamples()) {
@@ -217,6 +218,7 @@ public class ResultWriter {
         Integer.toString(s.getLatencyMicrosecond()),
         Integer.toString(s.getWorkerId()),
         Integer.toString(s.getPhaseId()),
+        s.getStatus().name(),
       };
       out.println(StringUtil.join(",", row));
     }

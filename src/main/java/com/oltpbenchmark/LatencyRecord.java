@@ -17,6 +17,7 @@
 
 package com.oltpbenchmark;
 
+import com.oltpbenchmark.types.TransactionStatus;
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -26,9 +27,10 @@ public class LatencyRecord implements Iterable<LatencyRecord.Sample> {
   static final int ALLOC_SIZE = 500000;
 
   /**
-   * Contains (start time, latency, transactionType, workerid, phaseid) pentiplets in microsecond
-   * form. The start times are "compressed" by encoding them as increments, starting from startNs. A
-   * 32-bit integer provides sufficient resolution for an interval of 2146 seconds, or 35 minutes.
+   * Contains (start time, latency, transactionType, workerid, phaseid, status) tuples in
+   * microsecond form. The start times are "compressed" by encoding them as increments, starting
+   * from startNs. A 32-bit integer provides sufficient resolution for an interval of 2146 seconds,
+   * or 35 minutes.
    */
   private final ArrayList<Sample[]> values = new ArrayList<>();
 
@@ -44,7 +46,12 @@ public class LatencyRecord implements Iterable<LatencyRecord.Sample> {
   }
 
   public void addLatency(
-      int transType, long startNanosecond, long endNanosecond, int workerId, int phaseId) {
+      int transType,
+      long startNanosecond,
+      long endNanosecond,
+      int workerId,
+      int phaseId,
+      TransactionStatus status) {
 
     if (nextIndex == ALLOC_SIZE) {
       allocateChunk();
@@ -56,7 +63,8 @@ public class LatencyRecord implements Iterable<LatencyRecord.Sample> {
     int latencyMicroseconds = (int) ((endNanosecond - startNanosecond + 500) / 1000);
 
     chunk[nextIndex] =
-        new Sample(transType, startOffsetNanosecond, latencyMicroseconds, workerId, phaseId);
+        new Sample(
+            transType, startOffsetNanosecond, latencyMicroseconds, workerId, phaseId, status);
     ++nextIndex;
 
     lastNanosecond += startOffsetNanosecond;
@@ -84,18 +92,22 @@ public class LatencyRecord implements Iterable<LatencyRecord.Sample> {
     private final int latencyMicrosecond;
     private final int workerId;
     private final int phaseId;
+    // Outcome of the last attempt.
+    private final TransactionStatus status;
 
     public Sample(
         int transactionType,
         long startNanosecond,
         int latencyMicrosecond,
         int workerId,
-        int phaseId) {
+        int phaseId,
+        TransactionStatus status) {
       this.transactionType = transactionType;
       this.startNanosecond = startNanosecond;
       this.latencyMicrosecond = latencyMicrosecond;
       this.workerId = workerId;
       this.phaseId = phaseId;
+      this.status = status;
     }
 
     public int getTransactionType() {
@@ -116,6 +128,10 @@ public class LatencyRecord implements Iterable<LatencyRecord.Sample> {
 
     public int getPhaseId() {
       return phaseId;
+    }
+
+    public TransactionStatus getStatus() {
+      return status;
     }
 
     @Override
