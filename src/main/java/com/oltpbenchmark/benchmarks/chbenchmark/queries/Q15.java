@@ -21,12 +21,20 @@ import com.oltpbenchmark.api.SQLStmt;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Q15 extends GenericQuery {
 
+  private static final AtomicInteger NEXT_VIEW = new AtomicInteger();
+
+  // Each worker creates and drops its own view: concurrent Q15s cannot share one name.
+  private final String view = "revenue" + NEXT_VIEW.getAndIncrement();
+
   public final SQLStmt createview_stmt =
       new SQLStmt(
-          "CREATE view revenue0 (supplier_no, total_revenue) AS "
+          "CREATE view "
+              + view
+              + " (supplier_no, total_revenue) AS "
               + "SELECT "
               + "mod((s_w_id * s_i_id),10000) as supplier_no, "
               + "sum(ol_amount) as total_revenue "
@@ -46,12 +54,16 @@ public class Q15 extends GenericQuery {
               + "su_address, "
               + "su_phone, "
               + "total_revenue "
-              + "FROM supplier, revenue0 "
+              + "FROM supplier, "
+              + view
+              + " "
               + "WHERE su_suppkey = supplier_no "
-              + "AND total_revenue = (select max(total_revenue) from revenue0) "
+              + "AND total_revenue = (select max(total_revenue) from "
+              + view
+              + ") "
               + "ORDER BY su_suppkey");
 
-  public final SQLStmt dropview_stmt = new SQLStmt("DROP VIEW revenue0");
+  public final SQLStmt dropview_stmt = new SQLStmt("DROP VIEW " + view);
 
   protected SQLStmt get_query() {
     return query_stmt;
