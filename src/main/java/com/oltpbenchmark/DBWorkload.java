@@ -140,7 +140,8 @@ public class DBWorkload {
       wrkld.setBatchSize(xmlConfig.getInt("batchsize", 128));
       wrkld.setSessionSetupFile(xmlConfig.getString("sessionsetupfile"));
       wrkld.setMaxRetries(xmlConfig.getInt("retries", 3));
-      wrkld.setAutoCommit(xmlConfig.getBoolean("autocommit", false));
+      boolean autoCommit = xmlConfig.getBoolean("autocommit[not(@bench)]", false);
+      wrkld.setAutoCommit(xmlConfig.getBoolean("autocommit" + pluginTest, autoCommit));
       wrkld.setNewConnectionPerTxn(xmlConfig.getBoolean("newConnectionPerTxn", false));
       wrkld.setReconnectOnConnectionFailure(
           xmlConfig.getBoolean("reconnectOnConnectionFailure", false));
